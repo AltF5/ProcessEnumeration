@@ -1,13 +1,15 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 
 // "Ctrl M, O is your Friend"
 //
 // Author:      https://github.com/AltF5
 // Created:     November 2020
+// History:     November 5th 2021 - Improved RestartExplorerGracefully()
 //
 // What:
 // What is this ProcessFinder.cs file?
@@ -72,6 +74,23 @@ using System.Text;
 
 
 #region 1 - Process Termination via Gracefully & Forcefully
+
+// Notes - This is how taskmgr.exe operates
+//          https://stackoverflow.com/a/10765274
+//
+//              [Applications] tab displaying Windows:
+//              Attempt 1:
+//                  When you click the "X" button in the title bar of an application's window, that sends the window a 'WM_CLOSE' message. This is a "graceful" shutdown—the application processes the message, handles any necessary cleanup tasks, and can even refuse to shut down if it so desires (by returning zero in response to the message). WM_CLOSE is simply a request that the window or application terminate; the window is not destroyed until the application itself calls the DestroyWindow function.
+//                  Pressing "End Task" button in Task Manager, [it] will first try to send the application (if it is a GUI application) a 'WM_CLOSE' message. In other words, it first asks nicely and gives the app a chance to terminate itself cleanly.*
+//
+//              Attempt 2: TerminateProcess()
+//              [If the process fails to] close in response to that initial WM_CLOSE message, the Task Manager will follow up by calling the TerminateProcess() function. This function is a little bit different because it forcefully terminates the application's process and all of its threads without asking for permission from the app. This is a very harsh method of closing something, and should be used as a last resort—such as when an application is hung and is no longer responding to messages.
+//              TerminateProcess() is a very low-level function that essentially rips the user-mode part of a process from memory, forcing it to terminate unconditionally. Calling TerminateProcess() bypasses such niceties as close notifications and DLL_PROCESS_DETACH.
+//              Your application does not have the ability to refuse to close, and there is no way to catch/trap/hook calls to TerminateProcess(). All user-mode code in the process simply stops running for good. This is a very unclean shut down procedure, somewhat akin to jerking the computer's power plug out of the wall.
+//
+//
+//              [Processes] tab:
+//                  [The first] step is skipped and the TerminateProcess() function is called immediately. This distinction is reflected in the caption on the respective buttons. For the "Applications" tab, the button is lableled "End Task"; for the "Processes" tab, the button is labeled "End Process".
 
 public static class ProcessTerminateGraceful
 {
@@ -194,7 +213,7 @@ public static class ProcessTerminateGraceful
         //      ProcessTerminateGraceful.CloseAllWindows(true, true, exclude);
 
         // Go ahead and handle explorer 1st (could do it last too, which is fine)
-        CloseAllExplorerWindows();
+        CloseAllExplorerFileWindows();
 
         List<ProcessEnum.ProcessInfo> all = ProcessEnum.EnumProcessesAndThreads_Native_MoreInfoAndFast();
 
@@ -229,7 +248,7 @@ public static class ProcessTerminateGraceful
         }
     }
 
-    public static void CloseAllExplorerWindows()
+    public static void CloseAllExplorerFileWindows()
     {
         // Explorer somewhat after this, when opening new windows
 
@@ -247,7 +266,7 @@ public static class ProcessTerminateGraceful
             {
                 if (TID != threadIDOfTaskbarToSkip && TID != threadIDOfTaskbarToSkip2)
                 {
-                    EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
+                    bool doesThreadHaveAnyWindows = EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
                     {
                         if (hWnd != hWindow_TopDesktopWindow && hWnd != hWindow_TopShellWindow)
                         {
@@ -322,7 +341,7 @@ public static class ProcessTerminateGraceful
             // Try closing application by sending WM_CLOSE to all child windows in all threads.
             foreach (int TID in process.ThreadIDs)
             {
-                EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
+                bool doesThreadHaveAnyWindows = EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
                 {
 
                     // Will also send WM_QUIT first, because why not -- https://stackoverflow.com/a/3155879
@@ -351,20 +370,20 @@ public static class ProcessTerminateGraceful
     /// Send WM_QUIT + WM_Close to all windows for all thread within all matching processes located by name (ProcessEnum).
     /// IMPORTANT: This will ONLY work if the current process is running at the same IL (Integrity Level) or higher. Otherwise PostMessage will be deflected with error 5 (Access denied)
     /// </summary>
-    public static void TerminateProcessGraceful(string processName)
+    public static void TerminateProcessGraceful(string allProccessMatchedWith1Name)
     {
-        TerminateProcessGraceful(new string[] { processName });
+        TerminateProcessGraceful(new string[] { allProccessMatchedWith1Name });
     }
 
     /// <summary>
     /// Send WM_QUIT + WM_Close to all windows for all thread within all matching processes located by name (ProcessEnum).
     /// IMPORTANT: This will ONLY work if the current process is running at the same IL (Integrity Level) or higher. Otherwise PostMessage will be deflected with error 5 (Access denied)
     /// </summary>
-    public static void TerminateProcessGraceful(string[] processNames)
+    public static void TerminateProcessGraceful(string[] multipleProcessNames)
     {
         var foundProcesses = new List<ProcessEnum.ProcessInfo[]>();
 
-        foreach (string processName in processNames)
+        foreach (string processName in multipleProcessNames)
         {
             ProcessEnum.ProcessInfo[] p = ProcessEnum.FindProcessByName(processName).ToArray();
             foundProcesses.Add(p);
@@ -385,7 +404,7 @@ public static class ProcessTerminateGraceful
                 // Try closing application by sending WM_CLOSE to all child windows in all threads.
                 foreach (int TID in proc.ThreadIDs)
                 {
-                    EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
+                    bool doesThreadHaveAnyWindows = EnumThreadWindows((uint)TID, delegate (IntPtr hWnd, IntPtr lParam)
                     {
                         // Will also send WM_QUIT first, because why not -- https://stackoverflow.com/a/3155879
                         //      WM_CLOSE vs WM_QUIT vs WM_DESTROY
@@ -433,6 +452,22 @@ public static class ProcessTerminateGraceful
 
     #region Terminate process forcefully (requires being able to open the process with PROCESS_TERMINATE)
 
+
+    /// <summary>
+    /// TerminateProcess is used to cause all of the threads in the process to terminate their execution, and causes all of the
+    ///     object handles opened by the process to be closed.The process is
+    ///      not removed from the system until the last handle to the process is closed.
+    ///
+    /// See process.c in Windows XP Src
+    /// TerminateProcess directly forwards the call to NtTerminateProcess (psdelete.c)
+    ///        PsGetNextProcessThread --> PspTerminateThreadByPointer
+    /// 
+    /// </summary>
+    /// <param name="hProcess">The handle must have been created with PROCESS_TERMINATE access.</param>
+    /// <param name="uExitCode">Supplies the termination status for each thread in the process.</param>
+    /// <returns>
+    /// True: Successful terminations by all threads terminating.
+    /// False (NULL) - The operation failed. Extended error status is available using GetLastError.</returns>
     [DllImport("kernel32.dll", EntryPoint = "TerminateProcess", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool TerminateProcess_API(IntPtr hProcess, uint uExitCode);
@@ -443,8 +478,8 @@ public static class ProcessTerminateGraceful
     /// </summary>
     public static bool TerminateProcessForceful(int PID)
     {
-        IntPtr hProcess = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.Terminate, false, PID);
-        if(hProcess == IntPtr.Zero)
+        IntPtr hProcess = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.Terminate, false, PID);        // PROCESS_TERMINATE access right needed
+        if (hProcess == IntPtr.Zero)
         {
             return false;
         }
@@ -463,36 +498,79 @@ public static class ProcessTerminateGraceful
         }
     }
 
+
+    public enum NumberProcessesTerminatedStatus
+    {
+        All,
+        Some,
+        None
+    }
+
+    public class NumberProcessesTerminated
+    {
+        public int CountTerminatedSuccessfully = 0;
+        public int CountFailed = 0;
+        public int CountTotalFound = 0;
+        public NumberProcessesTerminatedStatus ResultStatus = NumberProcessesTerminatedStatus.None;
+    }
+
+    public static NumberProcessesTerminated TerminateProcessForceful(string allProccessMatchedWith1Name)
+    {
+        // Don't assume this is one process. By name this could be MANY proccesses, like "explorer.exe"
+        return TerminateProcessForceful(new string[] { allProccessMatchedWith1Name });
+    }
+
     /// <summary>
     /// Terminates all matching process names by Force (TerminateProcess call)
     /// </summary>
-    public static List<ProcessEnum.ProcessInfo> TerminateProcessForceful(string processName)
+    public static NumberProcessesTerminated TerminateProcessForceful(string[] multipleProcessNames)
     {
-        List<ProcessEnum.ProcessInfo> processesFoundRet = ProcessEnum.GetProcessesByName(processName);
+        NumberProcessesTerminated ret = new NumberProcessesTerminated();
 
-        foreach (var p in processesFoundRet)
+        foreach (string currentNameToMatchAllProcesses in multipleProcessNames)
         {
-            IntPtr hProcess = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.Terminate, false, p.PID);
-            if (hProcess == IntPtr.Zero)
+            List<ProcessEnum.ProcessInfo> processesFoundRet = ProcessEnum.GetProcessesByName(currentNameToMatchAllProcesses);
+
+            foreach (var p in processesFoundRet)
             {
-                //return false;
-            }
-            else
-            {
-                bool did = TerminateProcess_API(hProcess, 0);
-                if (!did)
+                ret.CountTotalFound++;
+
+                IntPtr hProcess = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.Terminate, false, p.PID);      // PROCESS_TERMINATE access right needed
+                if (hProcess == IntPtr.Zero)
                 {
-                    _lastAPIError = Marshal.GetLastWin32Error();
-                    //return false;
+                    ret.CountFailed++;          // Failed if couln't open
                 }
                 else
                 {
-                    //return true;
+                    bool did = TerminateProcess_API(hProcess, 0);
+                    if (!did)
+                    {
+                        _lastAPIError = Marshal.GetLastWin32Error();
+                        ret.CountFailed++;
+                    }
+                    else
+                    {
+                        ret.CountTerminatedSuccessfully++;
+                    }
                 }
             }
         }
 
-        return processesFoundRet;
+        if(ret.CountTerminatedSuccessfully == ret.CountTotalFound)
+        {
+            ret.ResultStatus = NumberProcessesTerminatedStatus.All;
+        }
+        else if (ret.CountFailed == ret.CountTotalFound)
+        {
+            ret.ResultStatus = NumberProcessesTerminatedStatus.None;
+        }
+        else
+        {
+            ret.ResultStatus = NumberProcessesTerminatedStatus.Some;
+        }
+
+
+        return ret;
     }
 
     /// <summary>
@@ -514,13 +592,14 @@ public static class ProcessTerminateGraceful
     }
 
 
-    // ProcessEnum.FindProcessByName(processName).ToArray();
-
     #endregion
 
     #region Explorer specific window closing & termination
 
-    public static void TerminateExplorerGracefully()
+    /// <summary>
+    /// This only terminates the explorer.exe that runs the Desktop (Wallpaper) and Taskbar, not any other explorers, which may need to be done
+    /// </summary>
+    public static void TerminateExplorerDesktopGracefully()
     {
         // From: stackoverflow.com/a/5705965
         IntPtr hWndTray = FindWindow("Shell_TrayWnd", "");
@@ -532,19 +611,71 @@ public static class ProcessTerminateGraceful
     }
 
     /// <summary>
-    /// MUST be running as x64 (or disable Wow64) otherwise the explorer.exe relaunch will be an explorer Window, instead of the shell
+    /// Attempts to restart explorer gracefully by sending WM_QUIT & WM_CLOSE to all explorer windows.
+    /// If any windows don close after .7 of 1 second (common for altnerative Explorer.exe instances to have non-visible windows not respond to these)
+    ///     Then TerminateProcess (Forcefull termination) is performed
+    /// Lastly, explorer.exe is restarted
     /// </summary>
     public static void RestartExplorerGracefully()
     {
-        TerminateExplorerGracefully();
+        // Shortcut to not do the waiting below if explorer.exe isn't even running (simply start it)
+        bool isExplorerRunning = ProcessEnum.IsProcessRunning("explorer.exe");
+        if (isExplorerRunning)
+        {
+            // Go ahead and start with the Main Desktop Explorer.exe to get the ball rolling quickly, since it takes a bit to come down & repaint
+            TerminateExplorerDesktopGracefully();
 
-        // Required. Bare minimum is 1.5seconds it appears
-        System.Threading.Thread.Sleep(1500);
+            // Then target all other explorers gracefully
+            ProcessTerminateGraceful.TerminateProcessGraceful("explorer.exe");
 
+            Thread.Sleep(700);          // Let that cook before we go after them with TerminateProcess, especially since sending via PostMessage() rather than SendMessage() to not hang ourselces
+
+
+            // Some explorer.exe processes will have some non-visible windows that appear to get "stuck" and wont respond to WM_QUIT commands
+            // As such, a final termination sweep needs to be performed with TerminateProcess() call
+            var ret = ProcessTerminateGraceful.TerminateProcessForceful("explorer.exe");
+
+            // A lot shorter wait since TerminateProcess causes our thread to "do" the work synchronously terminating each thread of another process
+            // UPDATE: TerminateProcess is actually async: - https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
+            //      it initiates termination and returns immediately
+            //      If you need to be sure the process has terminated, call the WaitForSingleObject function with a handle to the process.
+            Thread.Sleep(200);          
+        }
+
+
+        // ONLY after all other instances of explorer that were killed, can it be restarted, otherwise the Main Desktop & Taskbar explorer end up in a loop
+        // [Re]Start it
         // Ideally restart with Medium IL, if the registry modification is in place, but this will suffice for now
+        StopWow64Redirection(true);                             // If this app was built as x86 and its running on x64 CPU, then WOW64 (32-bit) explorer.exe would instead be launched from c:\windows\syswow64, and not the actual main Desktop Shell x64 bit one
         System.Diagnostics.Process.Start("explorer.exe");
+        StopWow64Redirection(false);
     }
 
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool Wow64DisableWow64FsRedirection(ref IntPtr ptr);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool Wow64RevertWow64FsRedirection(IntPtr ptr);
+
+    static IntPtr wow64TogglePointer = new IntPtr();
+
+    /// <summary>
+    /// Call this method with true this when !AmI64Process
+    /// </summary>
+    public static bool StopWow64Redirection(bool stop)
+    {
+        if (stop)
+        {
+            return Wow64DisableWow64FsRedirection(ref wow64TogglePointer);
+        }
+        else
+        {
+            return Wow64RevertWow64FsRedirection(wow64TogglePointer);
+        }
+
+    }
 
     #endregion
 
@@ -1995,7 +2126,7 @@ public static class ProcessEnum
             {
                 do
                 {
-                    if (string.Compare(info.szExeFile, processName, true) == 0)
+                    if (string.Compare(info.szExeFile, processName,true) == 0)
                     {
                         return true;
                     }
@@ -4136,11 +4267,14 @@ public static class ProcessInformationReading
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool OpenProcessToken(IntPtr ProcessHandle, uint DesiredAccess, out IntPtr TokenHandle);
 
+    /// <summary>
+    /// Setting OpenAsSelf is what I would call "CheckAccessViaProcess"
+    ///     True = means the access check is made against the process' user security context.
+    ///     False =  means use the thread's user security context.
+    /// </summary>
     [DllImport("advapi32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     static extern bool OpenThreadToken(IntPtr ThreadHandle, uint DesiredAccess, bool CheckAccessViaProcess, out IntPtr TokenHandle);
-    // Setting OpenAsSelf is what I called "CheckAccessViaProcess" - True means the access check is made against the process' user security context.    False means use the thread's user security context.
-
 
     const uint TOKEN_ASSIGN_PRIMARY = 0x0001;
     const uint TOKEN_DUPLICATE = 0x0002;
