@@ -73,7 +73,7 @@ using System.Threading;
 //      - var ps = ProcessEnum.EnumProcesses().OrderByDescending(x => x.StartOrderFromEnum).ToList();
 
 
-#region 1 - Process Termination via Gracefully & Forcefully
+#region 1 - Process Termination via Gracefully & Forcefully classes
 
 // Notes - This is how taskmgr.exe operates
 //          https://stackoverflow.com/a/10765274
@@ -111,12 +111,7 @@ public static class ProcessTerminateGraceful
     #region Windows Enum (via GetWindow) & Message sending
 
     [DllImport("user32.dll", SetLastError = true)]
-    public static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
-
-    [DllImport("user32.dll", SetLastError = true)]
     public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
-
-
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -134,37 +129,10 @@ public static class ProcessTerminateGraceful
     [DllImport("user32.dll")]
     static extern IntPtr GetShellWindow();
 
-    [DllImport("user32", EntryPoint = "GetWindowLongA")]
-    static extern int GetWindowLong(IntPtr hwnd, int nIndex);
-
-    [DllImport("user32")]
-    static extern IntPtr GetParent(IntPtr hwnd);
-
-    [DllImport("user32", EntryPoint = "GetWindowTextA")]
-    static extern int GetWindowText(IntPtr hWnd, [Out] StringBuilder lpString, int nMaxCount);
-
-    const int GWL_ID = (-12);
-    const int GW_HWNDNEXT = 2;
-    const int GW_CHILD = 5;
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    static extern int GetWindowTextLength(IntPtr hWnd);
-
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
     #endregion
-
-    #endregion
-
-    #region -- User-defined Data Structures (Window Data Structure) --
-
-    public class Window
-    {
-        public string Title;
-        public string Class;
-        public IntPtr Handle;
-    }
 
     #endregion
 
@@ -303,7 +271,7 @@ public static class ProcessTerminateGraceful
 
         System.Threading.Thread.Sleep(50);
 
-        Window[] windowsFound = FindWindowLike("Shut Down Windows");
+        FindWindowExtended.Window[] windowsFound = FindWindowExtended.FindWindowLike("Shut Down Windows");
         foreach (var w in windowsFound)
         {
             if (w.Handle != IntPtr.Zero)
@@ -437,7 +405,7 @@ public static class ProcessTerminateGraceful
         // Example call:
         //      ProcessTerminateGraceful.TerminateProcessGracefulByWindowName("%notepad++%");
 
-        Window[] windows = FindWindowLike(windowNameLike, null);
+        FindWindowExtended.Window[] windows = FindWindowExtended.FindWindowLike(windowNameLike, null);
 
         foreach (var window in windows)
         {
@@ -450,7 +418,112 @@ public static class ProcessTerminateGraceful
 
     #endregion
 
-    #region Terminate process forcefully (requires being able to open the process with PROCESS_TERMINATE)
+    #region Explorer specific window closing & termination
+
+    /// <summary>
+    /// This only terminates the explorer.exe that runs the Desktop (Wallpaper) and Taskbar, not any other explorers, which may need to be done
+    /// </summary>
+    public static void TerminateExplorerDesktopGracefully()
+    {
+        // From: stackoverflow.com/a/5705965
+        IntPtr hWndTray = FindWindow("Shell_TrayWnd", "");
+        bool did = PostMessage(hWndTray, 0x5B4, IntPtr.Zero, IntPtr.Zero);     // Special undocumented WM_USER window message
+        if (!did)
+        {
+            _lastAPIError = Marshal.GetLastWin32Error();
+        }
+    }
+
+    /// <summary>
+    /// Attempts to restart explorer gracefully by sending WM_QUIT & WM_CLOSE to all explorer windows.
+    /// If any windows don close after .7 of 1 second (common for altnerative Explorer.exe instances to have non-visible windows not respond to these)
+    ///     Then TerminateProcess (Forcefull termination) is performed
+    /// Lastly, explorer.exe is restarted
+    /// </summary>
+    public static void RestartExplorerGracefully()
+    {
+        // Shortcut to not do the waiting below if explorer.exe isn't even running (simply start it)
+        bool isExplorerRunning = ProcessEnum.IsProcessRunning("explorer.exe");
+        if (isExplorerRunning)
+        {
+            // Go ahead and start with the Main Desktop Explorer.exe to get the ball rolling quickly, since it takes a bit to come down & repaint
+            TerminateExplorerDesktopGracefully();
+
+            // Then target all other explorers gracefully
+            ProcessTerminateGraceful.TerminateProcessGraceful("explorer.exe");
+
+            Thread.Sleep(700);          // Let that cook before we go after them with TerminateProcess, especially since sending via PostMessage() rather than SendMessage() to not hang ourselces
+
+
+            // Some explorer.exe processes will have some non-visible windows that appear to get "stuck" and wont respond to WM_QUIT commands
+            // As such, a final termination sweep needs to be performed with TerminateProcess() call
+            var ret = ProcessTerminateForceful.TerminateProcessForceful("explorer.exe");
+
+            // A lot shorter wait since TerminateProcess causes our thread to "do" the work synchronously terminating each thread of another process
+            // UPDATE: TerminateProcess is actually async: - https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
+            //      it initiates termination and returns immediately
+            //      If you need to be sure the process has terminated, call the WaitForSingleObject function with a handle to the process.
+            Thread.Sleep(200);          
+        }
+
+
+        // ONLY after all other instances of explorer that were killed, can it be restarted, otherwise the Main Desktop & Taskbar explorer end up in a loop
+        // [Re]Start it
+        // Ideally restart with Medium IL, if the registry modification is in place, but this will suffice for now
+        StopWow64Redirection(true);                             // If this app was built as x86 and its running on x64 CPU, then WOW64 (32-bit) explorer.exe would instead be launched from c:\windows\syswow64, and not the actual main Desktop Shell x64 bit one
+        System.Diagnostics.Process.Start("explorer.exe");
+        StopWow64Redirection(false);
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool Wow64DisableWow64FsRedirection(ref IntPtr ptr);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    static extern bool Wow64RevertWow64FsRedirection(IntPtr ptr);
+
+    static IntPtr wow64TogglePointer = new IntPtr();
+
+    /// <summary>
+    /// Call this method with true this when !AmI64Process
+    /// </summary>
+    public static bool StopWow64Redirection(bool stop)
+    {
+        if (stop)
+        {
+            return Wow64DisableWow64FsRedirection(ref wow64TogglePointer);
+        }
+        else
+        {
+            return Wow64RevertWow64FsRedirection(wow64TogglePointer);
+        }
+
+    }
+
+    #endregion
+
+}
+
+public static class ProcessTerminateForceful
+{
+    //
+    // Terminate process forcefully(requires being able to open the process with PROCESS_TERMINATE)
+    //
+
+    #region Last Err Field
+
+    static int _lastAPIError = 0;
+
+    public static int LastAPIErrorCode
+    {
+        get
+        {
+            return _lastAPIError;
+        }
+    }
+
+    #endregion
 
 
     /// <summary>
@@ -486,7 +559,7 @@ public static class ProcessTerminateGraceful
         else
         {
             bool did = TerminateProcess_API(hProcess, 0);
-            if(!did)
+            if (!did)
             {
                 _lastAPIError = Marshal.GetLastWin32Error();
                 return false;
@@ -556,7 +629,7 @@ public static class ProcessTerminateGraceful
             }
         }
 
-        if(ret.CountTerminatedSuccessfully == ret.CountTotalFound)
+        if (ret.CountTerminatedSuccessfully == ret.CountTotalFound)
         {
             ret.ResultStatus = NumberProcessesTerminatedStatus.All;
         }
@@ -581,106 +654,75 @@ public static class ProcessTerminateGraceful
         // Example call:
         //      ProcessTerminateGraceful.TerminateProcessForcefulByWindowName("%notepad++%");
 
-        Window[] windows = FindWindowLike(windowNameLike, null);
+        FindWindowExtended.Window[] windows = FindWindowExtended.FindWindowLike(windowNameLike, null);
 
         foreach (var window in windows)
         {
             // Window handle --> Thread ID and Process ID
-            uint tid_NotUsed = GetWindowThreadProcessId(window.Handle, out uint pid);
+            uint tid_NotUsed = ProcessInformationReading.GetWindowThreadProcessId(window.Handle, out uint pid);
             TerminateProcessForceful((int)pid);
         }
     }
 
+}
+
+
+#endregion
+
+#region 2 - FindWindowExtended Class (FindWindowLike)
+
+public static class FindWindowExtended
+{
+
+    #region -- APIs --
+
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern IntPtr FindWindowEx(IntPtr hwndParent, IntPtr hwndChildAfter, string lpszClass, string lpszWindow);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+
+    [DllImport("user32")]
+    static extern IntPtr GetWindow(IntPtr hwnd, int wCmd);
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetDesktopWindow();
+
+    [DllImport("user32.dll")]
+    static extern IntPtr GetShellWindow();
+
+    [DllImport("user32", EntryPoint = "GetWindowLongA")]
+    static extern int GetWindowLong(IntPtr hwnd, int nIndex);
+
+    [DllImport("user32")]
+    static extern IntPtr GetParent(IntPtr hwnd);
+
+    [DllImport("user32", EntryPoint = "GetWindowTextA")]
+    static extern int GetWindowText(IntPtr hWnd, [Out] StringBuilder lpString, int nMaxCount);
+
+    const int GWL_ID = (-12);
+    const int GW_HWNDNEXT = 2;
+    const int GW_CHILD = 5;
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowTextLength(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+    static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
     #endregion
 
-    #region Explorer specific window closing & termination
+    #region -- User-defined Data Structures (Window Data Structure) --
 
-    /// <summary>
-    /// This only terminates the explorer.exe that runs the Desktop (Wallpaper) and Taskbar, not any other explorers, which may need to be done
-    /// </summary>
-    public static void TerminateExplorerDesktopGracefully()
+    public class Window
     {
-        // From: stackoverflow.com/a/5705965
-        IntPtr hWndTray = FindWindow("Shell_TrayWnd", "");
-        bool did = PostMessage(hWndTray, 0x5B4, IntPtr.Zero, IntPtr.Zero);     // Special undocumented WM_USER window message
-        if (!did)
-        {
-            _lastAPIError = Marshal.GetLastWin32Error();
-        }
-    }
-
-    /// <summary>
-    /// Attempts to restart explorer gracefully by sending WM_QUIT & WM_CLOSE to all explorer windows.
-    /// If any windows don close after .7 of 1 second (common for altnerative Explorer.exe instances to have non-visible windows not respond to these)
-    ///     Then TerminateProcess (Forcefull termination) is performed
-    /// Lastly, explorer.exe is restarted
-    /// </summary>
-    public static void RestartExplorerGracefully()
-    {
-        // Shortcut to not do the waiting below if explorer.exe isn't even running (simply start it)
-        bool isExplorerRunning = ProcessEnum.IsProcessRunning("explorer.exe");
-        if (isExplorerRunning)
-        {
-            // Go ahead and start with the Main Desktop Explorer.exe to get the ball rolling quickly, since it takes a bit to come down & repaint
-            TerminateExplorerDesktopGracefully();
-
-            // Then target all other explorers gracefully
-            ProcessTerminateGraceful.TerminateProcessGraceful("explorer.exe");
-
-            Thread.Sleep(700);          // Let that cook before we go after them with TerminateProcess, especially since sending via PostMessage() rather than SendMessage() to not hang ourselces
-
-
-            // Some explorer.exe processes will have some non-visible windows that appear to get "stuck" and wont respond to WM_QUIT commands
-            // As such, a final termination sweep needs to be performed with TerminateProcess() call
-            var ret = ProcessTerminateGraceful.TerminateProcessForceful("explorer.exe");
-
-            // A lot shorter wait since TerminateProcess causes our thread to "do" the work synchronously terminating each thread of another process
-            // UPDATE: TerminateProcess is actually async: - https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
-            //      it initiates termination and returns immediately
-            //      If you need to be sure the process has terminated, call the WaitForSingleObject function with a handle to the process.
-            Thread.Sleep(200);          
-        }
-
-
-        // ONLY after all other instances of explorer that were killed, can it be restarted, otherwise the Main Desktop & Taskbar explorer end up in a loop
-        // [Re]Start it
-        // Ideally restart with Medium IL, if the registry modification is in place, but this will suffice for now
-        StopWow64Redirection(true);                             // If this app was built as x86 and its running on x64 CPU, then WOW64 (32-bit) explorer.exe would instead be launched from c:\windows\syswow64, and not the actual main Desktop Shell x64 bit one
-        System.Diagnostics.Process.Start("explorer.exe");
-        StopWow64Redirection(false);
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    static extern bool Wow64DisableWow64FsRedirection(ref IntPtr ptr);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    static extern bool Wow64RevertWow64FsRedirection(IntPtr ptr);
-
-    static IntPtr wow64TogglePointer = new IntPtr();
-
-    /// <summary>
-    /// Call this method with true this when !AmI64Process
-    /// </summary>
-    public static bool StopWow64Redirection(bool stop)
-    {
-        if (stop)
-        {
-            return Wow64DisableWow64FsRedirection(ref wow64TogglePointer);
-        }
-        else
-        {
-            return Wow64RevertWow64FsRedirection(wow64TogglePointer);
-        }
-
+        public string Title;
+        public string Class;
+        public IntPtr Handle;
     }
 
     #endregion
 
-
-    #region FindWindowLike (for Terminate process be Window Name)
 
     /// <summary>
     /// Uses FindWindowRecursive
@@ -926,13 +968,11 @@ public static class ProcessTerminateGraceful
         return list;
 
     }
-
-    #endregion
 }
 
 #endregion
 
-#region 2 - [A robust] ProcessEnum
+#region 3 - [A robust] ProcessEnum
 
 public static class ProcessEnum
 {
@@ -3508,7 +3548,7 @@ public static class ProcessEnum
 
 #endregion
 
-#region 3 - Process Information Querying (PEB reading)
+#region 4 - Process Information Querying (PEB reading)
 
 public static class ProcessInformationReading
 {
@@ -4811,7 +4851,7 @@ public static class ProcessInformationReading
 
     #endregion
 
-    #region Last Err
+    #region Last Err Field
 
     static int _lastAPIError = 0;
 
@@ -6788,7 +6828,7 @@ public static class ProcessInformationReading
 #endregion
 
 
-#region Extension Methods
+#region  [ Extension Methods ]
 
 public static class ExtensionMethods
 {
