@@ -1,15 +1,56 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading;
+
+#region Classes & Methods within:
+
+// --------------------
+// Classes contained:
+// --------------------
+//
+//      ProcessTerminateGraceful.               [ WM_QUIT & WM_CLOSE to all Windows of all threads of all processes ]
+//      ProcessTerminateForceful.               [ TerminateProcess ]
+//      FindWindowExtended.
+//      ProcessEnum.
+//      ProcessInformationReading.
+//      ProcessModify.                          [Critical unsetting]
+//
+// 
+// --------------------
+// Notable methods
+// --------------------
+//
+//      ProcessTerminateGraceful.
+//                              .CloseAllWindows()
+//                              .CloseAllExplorerFileWindows()
+//                              .TerminateProcessGraceful
+//                              .TerminateProcessGracefulByWindowName()
+//      ProcessTerminateForceful.
+//                              .TerminateProcess_API
+//                              .TerminateProcessForcefulByWindowName()
+//      FindWindowExtended.
+//                              .FindWindowLike()
+//      ProcessEnum.
+//                              .EnumProcesses (.GetAllProcesses as its Alias)
+//                              .GetAllProcessIDs()
+//                              .IsProcessRunning()
+//                              .FindProcessByName() (.GetProcessByName as its Alias)
+//                              .GetProcessInfoByPID()
+//                              .EnumModulesForProcess
+//                              .GetProcessInfoByFullFileNameWin32
+//                              .GetFullFileNameOfProcess_ViaModuleLookup
+//                              .EnumThreadsForProcess_Toolhelp
+//                              
+//      ProcessInformationReading.
+//                              .GetWindowThreadProcessId (API)
+//      ProcessModify.
+//                              .SetCriticalProcess
+
+#endregion
 
 // "Ctrl M, O is your Friend"
 //
 // Author:      https://github.com/AltF5
 // Created:     November 2020
 // History:     November 5th 2021 - Improved RestartExplorerGracefully()
+//              June 28th 2022    - Added SetProcessCritical & listed out notable methods (above)
 //
 // What:
 // What is this ProcessFinder.cs file?
@@ -71,6 +112,15 @@ using System.Threading;
 //      - var test = ProcessTerminateGraceful.CloseAllWindows(true, true)
 //
 //      - var ps = ProcessEnum.EnumProcesses().OrderByDescending(x => x.StartOrderFromEnum).ToList();
+
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading;
 
 
 #region 1 - Process Termination via Gracefully & Forcefully classes
@@ -150,7 +200,7 @@ public static class ProcessTerminateGraceful
 
     #endregion
 
-    #region Close All Windows (Send WM_QUIT + WM_Close to all Thread windows)
+    #region [Public] Close All Windows (Send WM_QUIT + WM_Close to all Thread windows)
 
     /// <summary>
     /// NOTICE: Best to run Elevated (High IL), otherwise PostMessage will fail to elevated apps (if this application is not running elevated itself)
@@ -203,7 +253,7 @@ public static class ProcessTerminateGraceful
                 x.Name.ToLower() != "devenv.exe").ToList();
         }
 
-        if(processNamesToExclude != null)
+        if (processNamesToExclude != null)
         {
             // From: stackoverflow.com/a/22160480/5555423 - Exclude items from a list
             processesMinusExplorer = processesMinusExplorer
@@ -284,7 +334,7 @@ public static class ProcessTerminateGraceful
 
     #endregion
 
-    #region Terminate Process gracefully (window closing via Msg send)
+    #region [Public] Terminate Process gracefully (window closing via Msg send)
 
     /// <summary>
     /// Send WM_QUIT + WM_Close to all windows for all thread within a process
@@ -383,7 +433,7 @@ public static class ProcessTerminateGraceful
 
                         // Request that all windows for this thread be closed
                         did = PostMessage(hWnd, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
-                        if(!did)
+                        if (!did)
                         {
                             _lastAPIError = Marshal.GetLastWin32Error();
                         }
@@ -418,7 +468,7 @@ public static class ProcessTerminateGraceful
 
     #endregion
 
-    #region Explorer specific window closing & termination
+    #region [Public] Explorer specific window closing & termination
 
     /// <summary>
     /// This only terminates the explorer.exe that runs the Desktop (Wallpaper) and Taskbar, not any other explorers, which may need to be done
@@ -463,7 +513,7 @@ public static class ProcessTerminateGraceful
             // UPDATE: TerminateProcess is actually async: - https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
             //      it initiates termination and returns immediately
             //      If you need to be sure the process has terminated, call the WaitForSingleObject function with a handle to the process.
-            Thread.Sleep(200);          
+            Thread.Sleep(200);
         }
 
 
@@ -474,6 +524,11 @@ public static class ProcessTerminateGraceful
         System.Diagnostics.Process.Start("explorer.exe");
         StopWow64Redirection(false);
     }
+
+    #endregion
+
+    #region Wow64 Disable Help
+
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -502,7 +557,6 @@ public static class ProcessTerminateGraceful
     }
 
     #endregion
-
 }
 
 public static class ProcessTerminateForceful
@@ -524,7 +578,6 @@ public static class ProcessTerminateForceful
     }
 
     #endregion
-
 
     /// <summary>
     /// TerminateProcess is used to cause all of the threads in the process to terminate their execution, and causes all of the
@@ -570,7 +623,6 @@ public static class ProcessTerminateForceful
             }
         }
     }
-
 
     public enum NumberProcessesTerminatedStatus
     {
@@ -673,7 +725,6 @@ public static class ProcessTerminateForceful
 
 public static class FindWindowExtended
 {
-
     #region -- APIs --
 
     [DllImport("user32.dll", SetLastError = true)]
@@ -722,7 +773,6 @@ public static class FindWindowExtended
     }
 
     #endregion
-
 
     /// <summary>
     /// Uses FindWindowRecursive
@@ -1016,7 +1066,7 @@ public static class ProcessEnum
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    struct RTL_USER_PROCESS_PARAMETERS
+    public struct RTL_USER_PROCESS_PARAMETERS
     {
         byte b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15;          // BYTE Reserved1[16];
         IntPtr ip0, ip1, ip2, ip3, ip4, ip5, ip6, ip7, ip8, ip9;                            // PVOID Reserved2[10];
@@ -1025,7 +1075,7 @@ public static class ProcessEnum
     };
 
     [StructLayout(LayoutKind.Sequential)]
-    struct PEB
+    public struct PEB
     {
         IntPtr Reserved1;
         IntPtr Reserved2;
@@ -1035,7 +1085,7 @@ public static class ProcessEnum
         // ...
     }
 
-    enum PROCESSINFOCLASS : int
+    public enum PROCESSINFOCLASS : int
     {
         ProcessBasicInformation = 0, // 0, q: PROCESS_BASIC_INFORMATION, PROCESS_EXTENDED_BASIC_INFORMATION
         ProcessQuotaLimits, // qs: QUOTA_LIMITS, QUOTA_LIMITS_EX
@@ -1066,7 +1116,12 @@ public static class ProcessEnum
         ProcessWow64Information, // q: ULONG_PTR
         ProcessImageFileName, // q: UNICODE_STRING
         ProcessLUIDDeviceMapsEnabled, // q: ULONG
-        ProcessBreakOnTermination, // qs: ULONG
+
+        /// <summary>
+        /// Critical flag
+        /// </summary>
+        ProcessBreakOnTermination_Critical,
+
         ProcessDebugObjectHandle, // 30, q: HANDLE
         ProcessDebugFlags, // qs: ULONG
         ProcessHandleTracing, // q: PROCESS_HANDLE_TRACING_QUERY; s: size 0 disables, otherwise enables
@@ -1325,7 +1380,7 @@ public static class ProcessEnum
     /// From:    .NET Source code: https://referencesource.microsoft.com/#System/services/monitoring/system/diagnosticts/ProcessManager.cs,0c3c811ff2002530
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    class SystemProcessInformation
+    public class SystemProcessInformation
     {
         // native struct defined in ntexapi.h
 
@@ -1403,7 +1458,7 @@ public static class ProcessEnum
     /// From:   .NET source code - https://referencesource.microsoft.com/#System/services/monitoring/system/diagnosticts/ProcessManager.cs,fd8b24cdb8931802
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
-    class SystemThreadInformation
+    public class SystemThreadInformation
     {
         public long KernelTime;
         public long UserTime;
@@ -1455,21 +1510,24 @@ public static class ProcessEnum
     [DllImport("ntdll.dll")]
     public static extern int RtlNtStatusToDosError(uint Status);
 
+    /// <summary>
+    /// Process_Basic_Information-specific
+    /// </summary>
     [DllImport("ntdll.dll")]
-    static extern uint NtQueryInformationProcess(
-        IntPtr hProcess,
-        PROCESSINFOCLASS pic,
-        out PROCESS_BASIC_INFORMATION pbi,
-        int cb,
-        out int pSize);
+    public static extern NTSTATUS NtQueryInformationProcess(IntPtr hProcess, PROCESSINFOCLASS pic, out PROCESS_BASIC_INFORMATION pbi, int sizeIn, out int pSizeNeeded);
 
+    /// <summary>
+    /// General-use
+    /// </summary>
+    [DllImport("ntdll.dll")]
+    public static extern NTSTATUS NtQueryInformationProcess(IntPtr hProcess, PROCESSINFOCLASS pic, IntPtr pBuffer_InOut, int sizeIn, out int pSizeNeeded);
+
+    /// <summary>
+    /// General System Information query
+    /// </summary>
     [DllImport("ntdll.dll", CharSet = CharSet.Auto)]
-    public static extern uint NtQuerySystemInformation(
-        int SystemInformationClass,
-        IntPtr SystemInformationBuffer,
-        int SystemInformationLength,
-        out int ReturnedSizeRequired);
-
+    public static extern NTSTATUS NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, IntPtr SystemInformationBuffer, int SystemInformationLength, out int ReturnedSizeRequired);
+    
     #endregion
 
     #region Handles
@@ -1508,13 +1566,13 @@ public static class ProcessEnum
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern IntPtr CreateToolhelp32Snapshot(SnapshotFlags dwFlags, uint th32ProcessID);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool QueryFullProcessImageName(IntPtr hprocess, int dwFlags, StringBuilder lpExeName, out int size);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr OpenProcess(ProcessAccessFlags dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
-    [DllImport("kernel32.dll")]
+    [DllImport("kernel32.dll", SetLastError = true)]
     public static extern IntPtr OpenProcess(uint dwDesiredAccess, bool bInheritHandle, int dwProcessId);
 
     [Flags]
@@ -1706,7 +1764,7 @@ public static class ProcessEnum
     static extern bool EnumThreadWindows(uint dwThreadId, EnumThreadDelegate lpfn, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
-    static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
 
     #endregion
@@ -1854,12 +1912,14 @@ public static class ProcessEnum
         /// </summary>
         Token_IsElevated = 4096,
 
+        Critical = 8192,
+
         /// <summary>
         /// Maximum possible information
         /// </summary>
-        Everything = Basic | StartTime | SessionID | Path | Cmdline | Modules | 
-                     Token_Integrity | Token_Username | Token_PrivilegeCountOnly | Token_Privileges | Token_GroupsCountOnly | Token_Groups | Token_IsElevated,
-
+        Everything = Basic | StartTime | SessionID | Path | Cmdline | Modules |
+                     Token_Integrity | Token_Username | Token_PrivilegeCountOnly | Token_Privileges | Token_GroupsCountOnly | Token_Groups | Token_IsElevated |
+                     Critical,
 
         /// <summary>
         /// All information is included except modules which can cause a slowdown in the enumeration process, since 
@@ -1892,6 +1952,7 @@ public static class ProcessEnum
 
         public string Cmdline = "";         // In the PEB
         public int SessionID;               // Either Known or simple call ProcessIdToSessionId(PID)
+        public bool? Critical;
 
         // Thread data is always included from PRocess enumeration, since that is included as part of NTQSI for SystemProcessInformation class ID, which toolhelp uses too for either Process or Thread snapshot
         public int ThreadCount;
@@ -1946,7 +2007,7 @@ public static class ProcessEnum
     {
         var ret = new List<ThreadInfo>();
 
-        foreach(var t in inputList)
+        foreach (var t in inputList)
         {
             var t2 = new ThreadInfo();
             t2.TID = t.TID;
@@ -2064,7 +2125,7 @@ public static class ProcessEnum
 
 
 
-    #region Typical Method calls
+    #region [Public] Method calls
 
     /// <summary>
     /// Enumerates all processes. Alias for GetAllProcesses().
@@ -2073,7 +2134,7 @@ public static class ProcessEnum
     {
         bool shouldEnumModules = infoReq == EnumInfoRequest.Everything || HasFlag((int)infoReq, (int)EnumInfoRequest.Modules);
 
-        if(HasFlag((int)infoReq, (int)EnumInfoRequest.EverythingExceptModules))
+        if (HasFlag((int)infoReq, (int)EnumInfoRequest.EverythingExceptModules))
         {
             shouldEnumModules = false;
         }
@@ -2166,7 +2227,7 @@ public static class ProcessEnum
             {
                 do
                 {
-                    if (string.Compare(info.szExeFile, processName,true) == 0)
+                    if (string.Compare(info.szExeFile, processName, true) == 0)
                     {
                         return true;
                     }
@@ -2249,7 +2310,7 @@ public static class ProcessEnum
         int count = 0;                          // Count of processes
 
         const int SystemProcessInformation = 5;             // SYSTEM_INFORMATION_CLASS
-        const uint InfoLengthMismatch = 0xc0000004;         // STATUS_INFO_LENGTH_MISMATCH NT Status return code. Equivalent to typical error: ERR_BAD_LENGTH(24)
+        const uint InfoLengthMismatch = 0xc0000004;         // STATUS_INFO_LENGTH_MISMATCH NT Status return code. 
 
         // Allocated buffer
         IntPtr allocatedMemory = Marshal.AllocHGlobal(startingSize);
@@ -2259,7 +2320,7 @@ public static class ProcessEnum
         //      Typically NTQIS is only called twice here...
         //
         int size = startingSize;
-        uint retCode = 0;
+        NTSTATUS retCode = NTSTATUS.Success;
         do
         {
             //
@@ -2268,12 +2329,12 @@ public static class ProcessEnum
             //      NtQuerySystemInformation(SystemProcessInformation
             // There doesn't appear to be a way to call NtQueryInformationProcess, to just obtain threads alone
             //      
-            retCode = NtQuerySystemInformation(SystemProcessInformation, allocatedMemory, size, out int required);
+            retCode = NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS.SystemProcessInformation, allocatedMemory, size, out int required);
 
-            int standardErr = RtlNtStatusToDosError(retCode);
+            int standardErr = RtlNtStatusToDosError((uint)retCode);
             _lastAPIError = standardErr;
 
-            if (retCode != InfoLengthMismatch)       // AKA ERR_BAD_LENGTH(24)
+            if (retCode != NTSTATUS.InfoLengthMismatch)       // Equivalent to typical Win32 error: ERR_BAD_LENGTH(24)
             {
                 break;
             }
@@ -2281,7 +2342,7 @@ public static class ProcessEnum
             size = required;
             allocatedMemory = Marshal.ReAllocHGlobal(allocatedMemory, new IntPtr(required));
 
-        } while (retCode == InfoLengthMismatch);
+        } while (retCode == NTSTATUS.InfoLengthMismatch);
 
 
         // All the data now exists in our process, so simply read it all...
@@ -2416,7 +2477,7 @@ public static class ProcessEnum
         //      Typically NTQIS is only called twice here...
         //
         int size = startingSize;
-        uint retCode = 0;
+        NTSTATUS retCode = NTSTATUS.Success;
         do
         {
             //
@@ -2425,12 +2486,12 @@ public static class ProcessEnum
             //      NtQuerySystemInformation(SystemProcessInformation
             // There doesn't appear to be a way to call NtQueryInformationProcess, to just obtain threads alone
             //      
-            retCode = NtQuerySystemInformation(SystemProcessInformation, allocatedMemory, size, out int required);
+            retCode = NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS.SystemProcessInformation, allocatedMemory, size, out int required);
 
-            int standardErr = RtlNtStatusToDosError(retCode);
+            int standardErr = RtlNtStatusToDosError((uint)retCode);
             _lastAPIError = standardErr;
 
-            if (retCode != InfoLengthMismatch)       // AKA ERR_BAD_LENGTH(24)
+            if (retCode != NTSTATUS.InfoLengthMismatch)       // AKA ERR_BAD_LENGTH(24)
             {
                 break;
             }
@@ -2438,7 +2499,7 @@ public static class ProcessEnum
             size = required;
             allocatedMemory = Marshal.ReAllocHGlobal(allocatedMemory, new IntPtr(required));
 
-        } while (retCode == InfoLengthMismatch);
+        } while (retCode == NTSTATUS.InfoLengthMismatch);
 
 
         // All the data now exists in our process, so simply read it all...
@@ -2520,7 +2581,7 @@ public static class ProcessEnum
         var ret = new List<ProcessInfo>();
 
         bool convertStartTime = false;
-        if(infoReq.HasFlag(EnumInfoRequest.StartTime))
+        if (infoReq.HasFlag(EnumInfoRequest.StartTime))
         {
             convertStartTime = true;
         }
@@ -2532,9 +2593,9 @@ public static class ProcessEnum
 
         foreach (ProcessInfoNTQSI pquery in processesAndThreads)
         {
-            if(filterSpecified)
+            if (filterSpecified)
             {
-                if(PIDFilter.HasValue && PIDFilter.Value != pquery.PID)
+                if (PIDFilter.HasValue && PIDFilter.Value != pquery.PID)
                 {
                     // Skip to the one being sought
                     continue;
@@ -2588,7 +2649,7 @@ public static class ProcessEnum
 
             ret.Add(p);
 
-            if(foundTargetedFilterPID_IfSupplied)
+            if (foundTargetedFilterPID_IfSupplied)
             {
                 break;
             }
@@ -2817,7 +2878,7 @@ public static class ProcessEnum
                             info.szExeFile,
                             (int)info.th32ParentProcessID,
                             (int)info.cntThreads
-                            // StartTime not avail with CreateToolhelp32Snapshot
+                        // StartTime not avail with CreateToolhelp32Snapshot
                         );
 
 
@@ -3265,6 +3326,16 @@ public static class ProcessEnum
                 ret.IsElevated = ProcessInformationReading.IsProcessElevated_IntegrityAndGroupCheck(hProcess_QueryInfo);
             }
 
+            if (infoReq.HasFlag(EnumInfoRequest.Critical) || WasEverythingFlagSupplied)
+            {
+                ret.Critical = ProcessInformationReading.IsProcessCritical(hProcess_QueryInfo, out ReturnStatus discard);
+            }
+
+
+            // 
+            // Done with ProcessQuery info
+            //
+
             CloseHandle(hProcess_QueryInfo);
         }
 
@@ -3357,7 +3428,7 @@ public static class ProcessEnum
 
             // Process Name, either from the Process Path if readable; otherwise from the OS Enum Snapshot
             //
-            if (string.IsNullOrEmpty(ret.FullPath)) 
+            if (string.IsNullOrEmpty(ret.FullPath))
             {
                 if (!didQueryEnumForMoreInfoAlready)
                 {
@@ -3376,7 +3447,7 @@ public static class ProcessEnum
             //
             if (didQueryEnumForMoreInfoAlready)
             {
-                ret.Threads = enumInfoFor1Process.Threads;                              
+                ret.Threads = enumInfoFor1Process.Threads;
             }
             else
             {
@@ -3407,7 +3478,7 @@ public static class ProcessEnum
             if (infoReq.HasFlag(EnumInfoRequest.Modules) || infoReq == EnumInfoRequest.Everything)
             {
                 // Toolhelp utilizes RtlQueryProcessDebugInformation (w/ RTL_QUERY_PROCESS_NONINVASIVE)
-                ret.Modules_Optional = EnumModulesForProcess(PID);                             
+                ret.Modules_Optional = EnumModulesForProcess(PID);
             }
 
             // Session ID
@@ -3508,7 +3579,7 @@ public static class ProcessEnum
 
                 CloseHandle(hProcess_QueryInfo);
             }
-            
+
         }
 
 
@@ -3522,17 +3593,17 @@ public static class ProcessEnum
 
     #region Misc methods
 
-    public static bool HasFlag(int flags, int flagToCheck)
+    static bool HasFlag(int flags, int flagToCheck)
     {
         return ((flags & flagToCheck) == flagToCheck);
     }
 
-    public static int RemoveFlag(int flags, int flag)
+    static int RemoveFlag(int flags, int flag)
     {
         return flags & ~flag;
     }
 
-    public static bool HasFlag(uint flags, uint flagToCheck)
+    static bool HasFlag(uint flags, uint flagToCheck)
     {
         return ((flags & flagToCheck) == flagToCheck);
     }
@@ -3548,7 +3619,7 @@ public static class ProcessEnum
 
 #endregion
 
-#region 4 - Process Information Querying (PEB reading)
+#region 4 - Process Information Reading & Querying (NTQIP, PEB CmdLine, etc)
 
 public static class ProcessInformationReading
 {
@@ -4376,7 +4447,7 @@ public static class ProcessInformationReading
         out SID_NAME_USE use);
 
     [DllImport("advapi32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        public static extern bool LookupAccountName(
+    public static extern bool LookupAccountName(
         string lpSystemName,
         string lpAccountName,
         [MarshalAs(UnmanagedType.LPArray)]
@@ -4866,7 +4937,6 @@ public static class ProcessInformationReading
     #endregion
 
 
-
     #region NtQueryInformationProcess methods
 
     /// <summary>
@@ -4974,6 +5044,60 @@ public static class ProcessInformationReading
         }
 
         return -1;
+    }
+
+    public static bool? IsProcessCritical(int PID, out ReturnStatus retStatus)
+    {
+        bool? isCriticalRet = null;
+        retStatus = new ReturnStatus();
+
+        // QueryInformationLimited or QueryInformation both work fine
+        IntPtr hProcessSet = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.QueryLimitedInformation, false, PID);
+        if (hProcessSet == IntPtr.Zero)
+        {
+            retStatus.FailedW32("OpenProcess", Marshal.GetLastWin32Error());
+        }
+        else
+        {
+            isCriticalRet = IsProcessCritical(hProcessSet, out retStatus);
+            CloseHandle(hProcessSet);
+        }
+
+        return isCriticalRet;
+    }
+
+    public static bool? IsProcessCritical(IntPtr hProcess, out ReturnStatus returnStatus)
+    {
+        bool? retIsCritical = null;
+        returnStatus = new ReturnStatus();
+
+        // ProcessBreakOnTermination_Critical = 0x1D (29)
+        IntPtr pIntBuffer = Marshal.AllocHGlobal(4);
+        NTSTATUS statCode = ProcessEnum.NtQueryInformationProcess(hProcess, ProcessEnum.PROCESSINFOCLASS.ProcessBreakOnTermination_Critical, pIntBuffer, Marshal.SizeOf(typeof(int)), out int sizeNeeded);
+        returnStatus.Success = statCode == NTSTATUS.Success;
+        if (!returnStatus.Success)
+        {
+            returnStatus.FailedNT("NtQueryInformationProcess", statCode);
+        }
+        else
+        {
+            // Read the 4 bytes;
+            int readInt = Marshal.ReadInt32(pIntBuffer);
+            if (readInt == 1)
+            {
+                retIsCritical = true;
+            }
+            else if (readInt == 0)
+            {
+                retIsCritical = false;
+            }
+            else
+            {
+                // keep as null
+            }
+        }
+
+        return retIsCritical;
     }
 
     #endregion
@@ -5909,7 +6033,7 @@ public static class ProcessInformationReading
     private static string[] GetTokenGroupAttributes_FromFlags(uint attributes)
     {
         // TODO list unknown bits.
-        if(attributes == 0)
+        if (attributes == 0)
         {
             return new string[] { TokenGroupAttributes.Disabled.ToString() };
         }
@@ -6355,7 +6479,7 @@ public static class ProcessInformationReading
         bool isElevatedIL = level >= IntegrityLevel.High;
         IsProcessElevated_BuiltinAdministratorsPresentAndEnabled(hProcess, out bool? elevatedAdminGroup, out bool successfullyReadGroups);
 
-        if(!successfullyReadGroups)
+        if (!successfullyReadGroups)
         {
             // Assume the process IS elevated if the groups cannot be read
             return true;
@@ -6368,13 +6492,13 @@ public static class ProcessInformationReading
         }
         else
         {
-            if(successfullyReadGroups && elevatedAdminGroup.HasValue && !elevatedAdminGroup.Value)
+            if (successfullyReadGroups && elevatedAdminGroup.HasValue && !elevatedAdminGroup.Value)
             {
                 // Definitely not elevated if this group was readable its not in there
                 return false;
             }
 
-            if(level == IntegrityLevel.Unknown)
+            if (level == IntegrityLevel.Unknown)
             {
                 // Fail case 2 - No IL readable  -- Assume its elevated, esepcailly if it has BUILTIN\Administratros group
                 return true;
@@ -6720,7 +6844,7 @@ public static class ProcessInformationReading
     {
         int sessionIDOut = -1;
         bool did = ProcessIdToSessionId(GetCurrentProcessId(), ref sessionIDOut);
-        if(!did)
+        if (!did)
         {
             _lastAPIError = Marshal.GetLastWin32Error();
         }
@@ -6827,6 +6951,660 @@ public static class ProcessInformationReading
 
 #endregion
 
+#region 5 - Process Modification
+
+public static class ProcessModify
+{
+    [DllImport("ntdll.dll")]
+    public static extern NTSTATUS NtSetInformationProcess(IntPtr hProcess, ProcessEnum.PROCESSINFOCLASS pic, IntPtr inputInfo, int lengthOfInput);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CloseHandle(IntPtr hSnapshot);
+
+    public static ReturnStatus SetCriticalProcess(int PID, bool critical)
+    {
+        var ret = new ReturnStatus();
+
+        IntPtr hProcessSet = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.SetInformation, false, PID);
+        if(hProcessSet == IntPtr.Zero)
+        {
+            ret.FailedW32("OpenProcess", Marshal.GetLastWin32Error());
+        }
+        else
+        {
+            ret = SetProcessCritical(hProcessSet, critical);
+            CloseHandle(hProcessSet);
+        }
+
+        return ret;
+    }
+
+    /// <summary>
+    /// Changes a process's Critical flag to indicate if the system should panic (BSOD) if TerminateProcess is performed on a an marked processed
+    /// </summary>
+    /// <param name="hProcess">A process handle PROCESS_SET_INFORMATION (per SystemInformer)</param>
+    /// <param name="critical">Set or Unset critical (BreakOnTermination) flag</param>
+    public static ReturnStatus SetProcessCritical(IntPtr hProcess, bool critical)
+    {
+        var ret = new ReturnStatus();
+
+        // ProcessBreakOnTermination_Critical = 0x1D (29)
+        int criticalFlag = critical ? 1 : 0;
+
+        int inputSizeInt = Marshal.SizeOf(typeof(int));             // 4 bytes
+        IntPtr areaToWrite = Marshal.AllocHGlobal(inputSizeInt);
+        Marshal.WriteInt32(areaToWrite, criticalFlag);
+
+        NTSTATUS statCode = NtSetInformationProcess(hProcess, ProcessEnum.PROCESSINFOCLASS.ProcessBreakOnTermination_Critical, areaToWrite, inputSizeInt);
+        ret.Success = statCode == NTSTATUS.Success;
+        if(!ret.Success)
+        {
+            ret.FailedNT("NtSetInformationProcess", statCode);
+        }
+
+        return ret;
+    }
+
+    #region Exmaple use
+
+    /// <summary>
+    /// Critical unset (AccessDenied will result for csrss.exe, smss.exe, wininit.exe, and 1 other even with PPL removed at a driver level (note: PatchGuard will eventually trigger a BSOD)
+    /// </summary>
+    //void MakeAllProcessesNonCritical()
+    //{
+    //    Debug.WriteLine("");
+    //    Debug.WriteLine("--- List ---");
+    //
+    //    foreach (var p in ProcessEnum.GetAllProcesses().Where(x => x.Critical.HasValue && x.Critical.Value).ToList())
+    //    {
+    //        Debug.WriteLine(p.Name + " - " + p.PID + " - " + p.Critical);
+    //    }
+    //
+    //    Debug.WriteLine("");
+    //    Debug.WriteLine("--- Changing ---");
+    //    foreach (var p in ProcessEnum.GetAllProcesses().Where(x => x.Critical.HasValue && x.Critical.Value).ToList())
+    //    {
+    //        Debug.WriteLine(p.Name + " - " + p.PID + " - " + p.Critical);
+    //
+    //        var stat = ProcessModify.SetCriticalProcess(p.PID, false);
+    //        if (!stat.Success)
+    //        {
+    //            Debug.WriteLine(stat.VerboseInfo);
+    //        }
+    //        else
+    //        {
+    //            Debug.WriteLine("Changed!");
+    //        }
+    //    }
+    //
+    //    Debug.WriteLine("");
+    //    Debug.WriteLine("--- New  ---");
+    //    foreach (var p in ProcessEnum.GetAllProcesses().Where(x => x.Critical.HasValue && x.Critical.Value).ToList())
+    //    {
+    //        Debug.WriteLine(p.Name + " - " + p.PID + " - " + p.Critical);
+    //    }
+    //}
+
+    #endregion
+}
+
+#endregion
+
+
+
+#region ErrorHelp class
+
+public static class ErrorHelp
+{
+    /// <summary>
+    /// Displays the error code in Hex, Decimal, and the message
+    /// (int works here too, but keeping as uint just for better debugging display of status code (not being negative))
+    /// </summary>
+    /// <returns>Info regarding the error</returns>
+    public static string GetErrorInfoNt(uint ntStatusErrorCode)
+    {
+        int win32ErrorCode = RtlNtStatusToDosError(ntStatusErrorCode);
+        return string.Format("NT Status Error: {0}, 0x{0:X} : (Win32 Code: {1}, 0x{1:X}) : {2} = \"{3}\"", ntStatusErrorCode, win32ErrorCode, GetErrorVariableNameNt(ntStatusErrorCode), new Win32Exception(win32ErrorCode).Message);
+    }
+
+    public static string GetErrorInfo(int win32ErrorCode)
+    {
+        return string.Format("GetLastError: {0}, 0x{0:X} = \"{1}\"", win32ErrorCode, new Win32Exception(win32ErrorCode).Message);
+    }
+
+    public static string GetErrorInfoNt(int ntStatusErrorCode)
+    {
+        return GetErrorInfoNt((uint)ntStatusErrorCode);
+    }
+
+    /// <summary>
+    /// Translates an error code to the variable name of the Win32 Error
+    /// </summary>
+    //public static string GetErrorVariableNameWin32(int win32ErrorCode)
+    //{
+    //    // This is a class with 'public const'  (static)
+    //
+    //    FieldInfo[] fields = typeof(Win32Error).GetFields();
+    //    foreach (FieldInfo fi in fields)
+    //        if ((int)fi.GetValue(null) == win32ErrorCode)
+    //            return fi.Name;
+    //    return String.Empty;
+    //
+    //
+    //    // For an enum:
+    //    //return Enum.GetName(typeof(Win32Error), errCode);
+    //}
+
+    public static string GetErrorVariableNameNt(uint ntErrorCode)
+    {
+        return ((NTSTATUS)ntErrorCode).ToString();
+
+        // OR
+        //return Enum.GetName(typeof(Win32Error), errCode);
+    }
+
+    /// <summary>
+    /// Translates an error code (like 5) into a message: "Access is Denied"
+    /// This is like in Visual Studio doing: Tools --> Error Lookup
+    /// </summary>
+    /// <returns>The error code string description</returns>
+    public static string GetErrorMessageOnly(int win32ErrorCode)
+    {
+        return new Win32Exception(win32ErrorCode).Message;
+
+        // Internal information: How Win32Exception gets its information - It calls FormatMessage
+        // https://referencesource.microsoft.com/#System/compmod/system/componentmodel/Win32Exception.cs,d37f64a3800f4771
+        // See which calls TryGetErrorMessage
+    }
+
+    /// <summary>
+    /// Perform the same functionality as new Win32Exception(errorCode).Message, but calls the FormatMessage Windows API directly
+    /// </summary>
+    public static string GetErrorMessageAPI(uint win32ErrorCode)
+    {
+        // From:
+        // https://stackoverflow.com/questions/27326109/pinvoke-ntopenfile-and-ntqueryeafile-in-order-to-read-ntfs-extended-attributes-i
+        //
+        // Could also implement it like .NET in the C# source:
+        //      https://referencesource.microsoft.com/#System/compmod/system/componentmodel/Win32Exception.cs,824f982cf95a6267
+        //      GetErrorMessage and TryGetErrorMessage
+
+        int capacity = 512;
+        int FORMAT_MESSAGE_FROM_SYSTEM = 0x00001000;
+        StringBuilder sb = new StringBuilder(capacity);
+
+        FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM, IntPtr.Zero, win32ErrorCode, 0, sb, sb.Capacity, IntPtr.Zero);
+        int i = sb.Length;
+        if (i > 0 && sb[i - 1] == 10) i--;
+        if (i > 0 && sb[i - 1] == 13) i--;
+        sb.Length = i;
+
+        return sb.ToString();
+    }
+
+    public static string ShowHexAndDec(int num)
+    {
+        return string.Format("0x{0:X} ({1})", num, num);
+
+        // Note:
+        // For Dec to Hex you can also use String.Convert(str, base)
+        // As shown here https://referencesource.microsoft.com/#System/compmod/system/componentmodel/Win32Exception.cs,d37f64a3800f4771
+    }
+
+    public static string ShowHexAndDec(uint num)
+    {
+        return string.Format("0x{0:X} ({1})", num, num);
+    }
+
+    public static string ShowHexAndDec(IntPtr num)
+    {
+        return string.Format("0x{0:X} ({1})", (uint)num, (uint)num);
+    }
+
+    public static string Dec2Hex(int dec)
+    {
+        return "0x" + dec.ToString("X");
+    }
+
+    public static string Dec2Hex(long dec)
+    {
+        return "0x" + dec.ToString("X");
+    }
+
+    public static string Dec2Hex(IntPtr ptr)
+    {
+        return "0x" + ptr.ToString("X");
+    }
+
+    static bool NT_SUCCESS(NTSTATUS status)
+    {
+        return ((uint)status & 0x80000000) == 0;
+    }
+
+    static bool NT_SUCCESS(uint status)
+    {
+        return (status & 0x80000000) == 0;
+    }
+
+    #region APIs
+
+    [DllImport("ntdll.dll")]
+    public static extern int RtlNtStatusToDosError(uint Status);
+
+    // Note: Just need to use Win32Exception(Marshal.GetLastWin32Error).Messsage
+    // Win32 vs. HRESULT vs. NTSTATUS
+    [DllImport("kernel32.dll")]
+    public static extern uint FormatMessage(int dwFlags, IntPtr lpSource, uint dwMessageId, int dwLanguageId, StringBuilder lpBuffer, int nSize, IntPtr Arguments);
+
+    #endregion
+}
+
+#endregion
+
+#region NTSTATUS Error Codes Enum
+
+/// <summary>
+/// A non-exhaustive NtStatus code list for return codes from Native (Nt / Zw) API function calls
+/// Translatable via ErrorHelp.GetErrorInfoNt
+/// </summary>
+public enum NTSTATUS : uint
+{
+    // Success
+    Success = 0x00000000,
+    Wait0 = 0x00000000,
+    Wait1 = 0x00000001,
+    Wait2 = 0x00000002,
+    Wait3 = 0x00000003,
+    Wait63 = 0x0000003f,
+    Abandoned = 0x00000080,
+    AbandonedWait0 = 0x00000080,
+    AbandonedWait1 = 0x00000081,
+    AbandonedWait2 = 0x00000082,
+    AbandonedWait3 = 0x00000083,
+    AbandonedWait63 = 0x000000bf,
+    UserApc = 0x000000c0,
+    KernelApc = 0x00000100,
+    Alerted = 0x00000101,
+    Timeout = 0x00000102,
+    Pending = 0x00000103,
+    Reparse = 0x00000104,
+    MoreEntries = 0x00000105,
+    NotAllAssigned = 0x00000106,
+    SomeNotMapped = 0x00000107,
+    OpLockBreakInProgress = 0x00000108,
+    VolumeMounted = 0x00000109,
+    RxActCommitted = 0x0000010a,
+    NotifyCleanup = 0x0000010b,
+    NotifyEnumDir = 0x0000010c,
+    NoQuotasForAccount = 0x0000010d,
+    PrimaryTransportConnectFailed = 0x0000010e,
+    PageFaultTransition = 0x00000110,
+    PageFaultDemandZero = 0x00000111,
+    PageFaultCopyOnWrite = 0x00000112,
+    PageFaultGuardPage = 0x00000113,
+    PageFaultPagingFile = 0x00000114,
+    CrashDump = 0x00000116,
+    ReparseObject = 0x00000118,
+    NothingToTerminate = 0x00000122,
+    ProcessNotInJob = 0x00000123,
+    ProcessInJob = 0x00000124,
+    ProcessCloned = 0x00000129,
+    FileLockedWithOnlyReaders = 0x0000012a,
+    FileLockedWithWriters = 0x0000012b,
+
+    // Informational
+    Informational = 0x40000000,
+    ObjectNameExists = 0x40000000,
+    ThreadWasSuspended = 0x40000001,
+    WorkingSetLimitRange = 0x40000002,
+    ImageNotAtBase = 0x40000003,
+    RegistryRecovered = 0x40000009,
+
+    // Warning
+    Warning = 0x80000000,
+    GuardPageViolation = 0x80000001,
+    DatatypeMisalignment = 0x80000002,
+    Breakpoint = 0x80000003,
+    SingleStep = 0x80000004,
+    BufferOverflow = 0x80000005,
+    NoMoreFiles = 0x80000006,
+    HandlesClosed = 0x8000000a,
+    PartialCopy = 0x8000000d,
+    DeviceBusy = 0x80000011,
+    InvalidEaName = 0x80000013,
+    EaListInconsistent = 0x80000014,
+    NoMoreEntries = 0x8000001a,
+    LongJump = 0x80000026,
+    DllMightBeInsecure = 0x8000002b,
+
+    // Error
+    Error = 0xc0000000,
+    Unsuccessful = 0xc0000001,
+    NotImplemented = 0xc0000002,
+    InvalidInfoClass = 0xc0000003,
+    InfoLengthMismatch = 0xc0000004,
+    AccessViolation = 0xc0000005,
+    InPageError = 0xc0000006,
+    PagefileQuota = 0xc0000007,
+    InvalidHandle = 0xc0000008,
+    BadInitialStack = 0xc0000009,
+    BadInitialPc = 0xc000000a,
+    InvalidCid = 0xc000000b,
+    TimerNotCanceled = 0xc000000c,
+    InvalidParameter = 0xc000000d,
+    NoSuchDevice = 0xc000000e,
+    NoSuchFile = 0xc000000f,
+
+    /// <summary>
+    /// ZwUnloadDriver : https://docs.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/nf-wdm-zwunloaddriver
+    /// 
+    ///         "If the driver specified in DriverServiceName has no DriverUnload callback routine set in its DRIVER_OBJECT structure, ZwUnloadDriver returns STATUS_INVALID_DEVICE_REQUEST."
+    ///         "If DriverName is the name of a PnP device driver, ZwUnloadDriver returns STATUS_INVALID_DEVICE_REQUEST and does not unload the driver."
+    ///         "A minifilter should use FltUnloadFilter instead of ZwUnloadDriver to unload a supporting minifilter."
+    /// </summary>
+    InvalidDeviceRequest = 0xc0000010,
+
+    EndOfFile = 0xc0000011,
+    WrongVolume = 0xc0000012,
+    NoMediaInDevice = 0xc0000013,
+    NoMemory = 0xc0000017,
+    NotMappedView = 0xc0000019,
+    UnableToFreeVm = 0xc000001a,
+    UnableToDeleteSection = 0xc000001b,
+    IllegalInstruction = 0xc000001d,
+    AlreadyCommitted = 0xc0000021,
+    AccessDenied = 0xc0000022,
+    BufferTooSmall = 0xc0000023,
+    ObjectTypeMismatch = 0xc0000024,
+    NonContinuableException = 0xc0000025,
+    BadStack = 0xc0000028,
+    NotLocked = 0xc000002a,
+    NotCommitted = 0xc000002d,
+    InvalidParameterMix = 0xc0000030,
+    ObjectNameInvalid = 0xc0000033,
+
+    /// <summary>
+    /// NtUnloadDriver returns this when the driver was created and loaded by the SCM via CreateService(SERVICE_KERNEL_DRIVER)
+    /// Thus only an SCM StopService (ControlService(Stop)) will be able to unload the driver
+    /// </summary>
+    ObjectNameNotFound = 0xc0000034,
+
+    ObjectNameCollision = 0xc0000035,
+    ObjectPathInvalid = 0xc0000039,
+    ObjectPathNotFound = 0xc000003a,
+    ObjectPathSyntaxBad = 0xc000003b,
+    DataOverrun = 0xc000003c,
+    DataLate = 0xc000003d,
+    DataError = 0xc000003e,
+    CrcError = 0xc000003f,
+    SectionTooBig = 0xc0000040,
+    PortConnectionRefused = 0xc0000041,
+    InvalidPortHandle = 0xc0000042,
+    SharingViolation = 0xc0000043,
+    QuotaExceeded = 0xc0000044,
+    InvalidPageProtection = 0xc0000045,
+    MutantNotOwned = 0xc0000046,
+    SemaphoreLimitExceeded = 0xc0000047,
+    PortAlreadySet = 0xc0000048,
+    SectionNotImage = 0xc0000049,
+    SuspendCountExceeded = 0xc000004a,
+    ThreadIsTerminating = 0xc000004b,
+    BadWorkingSetLimit = 0xc000004c,
+    IncompatibleFileMap = 0xc000004d,
+    SectionProtection = 0xc000004e,
+    EasNotSupported = 0xc000004f,
+    EaTooLarge = 0xc0000050,
+    NonExistentEaEntry = 0xc0000051,
+    NoEasOnFile = 0xc0000052,
+    EaCorruptError = 0xc0000053,
+    FileLockConflict = 0xc0000054,
+    LockNotGranted = 0xc0000055,
+    DeletePending = 0xc0000056,
+    CtlFileNotSupported = 0xc0000057,
+    UnknownRevision = 0xc0000058,
+    RevisionMismatch = 0xc0000059,
+    InvalidOwner = 0xc000005a,
+    InvalidPrimaryGroup = 0xc000005b,
+    NoImpersonationToken = 0xc000005c,
+    CantDisableMandatory = 0xc000005d,
+    NoLogonServers = 0xc000005e,
+    NoSuchLogonSession = 0xc000005f,
+    NoSuchPrivilege = 0xc0000060,
+    PrivilegeNotHeld = 0xc0000061,
+    InvalidAccountName = 0xc0000062,
+    UserExists = 0xc0000063,
+    NoSuchUser = 0xc0000064,
+    GroupExists = 0xc0000065,
+    NoSuchGroup = 0xc0000066,
+    MemberInGroup = 0xc0000067,
+    MemberNotInGroup = 0xc0000068,
+    LastAdmin = 0xc0000069,
+    WrongPassword = 0xc000006a,
+    IllFormedPassword = 0xc000006b,
+    PasswordRestriction = 0xc000006c,
+    LogonFailure = 0xc000006d,
+    AccountRestriction = 0xc000006e,
+    InvalidLogonHours = 0xc000006f,
+    InvalidWorkstation = 0xc0000070,
+    PasswordExpired = 0xc0000071,
+    AccountDisabled = 0xc0000072,
+    NoneMapped = 0xc0000073,
+    TooManyLuidsRequested = 0xc0000074,
+    LuidsExhausted = 0xc0000075,
+    InvalidSubAuthority = 0xc0000076,
+    InvalidAcl = 0xc0000077,
+    InvalidSid = 0xc0000078,
+    InvalidSecurityDescr = 0xc0000079,
+    ProcedureNotFound = 0xc000007a,
+    InvalidImageFormat = 0xc000007b,
+    NoToken = 0xc000007c,
+    BadInheritanceAcl = 0xc000007d,
+    RangeNotLocked = 0xc000007e,
+    DiskFull = 0xc000007f,
+    ServerDisabled = 0xc0000080,
+    ServerNotDisabled = 0xc0000081,
+    TooManyGuidsRequested = 0xc0000082,
+    GuidsExhausted = 0xc0000083,
+    InvalidIdAuthority = 0xc0000084,
+    AgentsExhausted = 0xc0000085,
+    InvalidVolumeLabel = 0xc0000086,
+    SectionNotExtended = 0xc0000087,
+    NotMappedData = 0xc0000088,
+    ResourceDataNotFound = 0xc0000089,
+    ResourceTypeNotFound = 0xc000008a,
+    ResourceNameNotFound = 0xc000008b,
+    ArrayBoundsExceeded = 0xc000008c,
+    FloatDenormalOperand = 0xc000008d,
+    FloatDivideByZero = 0xc000008e,
+    FloatInexactResult = 0xc000008f,
+    FloatInvalidOperation = 0xc0000090,
+    FloatOverflow = 0xc0000091,
+    FloatStackCheck = 0xc0000092,
+    FloatUnderflow = 0xc0000093,
+    IntegerDivideByZero = 0xc0000094,
+    IntegerOverflow = 0xc0000095,
+    PrivilegedInstruction = 0xc0000096,
+    TooManyPagingFiles = 0xc0000097,
+    FileInvalid = 0xc0000098,
+    InstanceNotAvailable = 0xc00000ab,
+    PipeNotAvailable = 0xc00000ac,
+    InvalidPipeState = 0xc00000ad,
+    PipeBusy = 0xc00000ae,
+    IllegalFunction = 0xc00000af,
+    PipeDisconnected = 0xc00000b0,
+    PipeClosing = 0xc00000b1,
+    PipeConnected = 0xc00000b2,
+    PipeListening = 0xc00000b3,
+    InvalidReadMode = 0xc00000b4,
+    IoTimeout = 0xc00000b5,
+    FileForcedClosed = 0xc00000b6,
+    ProfilingNotStarted = 0xc00000b7,
+    ProfilingNotStopped = 0xc00000b8,
+    DeviceDoesNotExist = 0xc00000c0,
+    NotSameDevice = 0xc00000d4,
+    FileRenamed = 0xc00000d5,
+    CantWait = 0xc00000d8,
+    PipeEmpty = 0xc00000d9,
+    CantTerminateSelf = 0xc00000db,
+    InternalError = 0xc00000e5,
+    InvalidParameter1 = 0xc00000ef,
+    InvalidParameter2 = 0xc00000f0,
+    InvalidParameter3 = 0xc00000f1,
+    InvalidParameter4 = 0xc00000f2,
+    InvalidParameter5 = 0xc00000f3,
+    InvalidParameter6 = 0xc00000f4,
+    InvalidParameter7 = 0xc00000f5,
+    InvalidParameter8 = 0xc00000f6,
+    InvalidParameter9 = 0xc00000f7,
+    InvalidParameter10 = 0xc00000f8,
+    InvalidParameter11 = 0xc00000f9,
+    InvalidParameter12 = 0xc00000fa,
+    MappedFileSizeZero = 0xc000011e,
+    TooManyOpenedFiles = 0xc000011f,
+    Cancelled = 0xc0000120,
+    CannotDelete = 0xc0000121,
+    InvalidComputerName = 0xc0000122,
+    FileDeleted = 0xc0000123,
+    SpecialAccount = 0xc0000124,
+    SpecialGroup = 0xc0000125,
+    SpecialUser = 0xc0000126,
+    MembersPrimaryGroup = 0xc0000127,
+    FileClosed = 0xc0000128,
+    TooManyThreads = 0xc0000129,
+    ThreadNotInProcess = 0xc000012a,
+    TokenAlreadyInUse = 0xc000012b,
+    PagefileQuotaExceeded = 0xc000012c,
+    CommitmentLimit = 0xc000012d,
+    InvalidImageLeFormat = 0xc000012e,
+    InvalidImageNotMz = 0xc000012f,
+    InvalidImageProtect = 0xc0000130,
+    InvalidImageWin16 = 0xc0000131,
+    LogonServer = 0xc0000132,
+    DifferenceAtDc = 0xc0000133,
+    SynchronizationRequired = 0xc0000134,
+    DllNotFound = 0xc0000135,
+    IoPrivilegeFailed = 0xc0000137,
+    OrdinalNotFound = 0xc0000138,
+    EntryPointNotFound = 0xc0000139,
+    ControlCExit = 0xc000013a,
+    PortNotSet = 0xc0000353,
+    DebuggerInactive = 0xc0000354,
+    CallbackBypass = 0xc0000503,
+    PortClosed = 0xc0000700,
+    MessageLost = 0xc0000701,
+    InvalidMessage = 0xc0000702,
+    RequestCanceled = 0xc0000703,
+    RecursiveDispatch = 0xc0000704,
+    LpcReceiveBufferExpected = 0xc0000705,
+    LpcInvalidConnectionUsage = 0xc0000706,
+    LpcRequestsNotAllowed = 0xc0000707,
+    ResourceInUse = 0xc0000708,
+    ProcessIsProtected = 0xc0000712,
+    VolumeDirty = 0xc0000806,
+    FileCheckedOut = 0xc0000901,
+    CheckOutRequired = 0xc0000902,
+    BadFileType = 0xc0000903,
+    FileTooLarge = 0xc0000904,
+    FormsAuthRequired = 0xc0000905,
+    VirusInfected = 0xc0000906,
+    VirusDeleted = 0xc0000907,
+    TransactionalConflict = 0xc0190001,
+    InvalidTransaction = 0xc0190002,
+    TransactionNotActive = 0xc0190003,
+    TmInitializationFailed = 0xc0190004,
+    RmNotActive = 0xc0190005,
+    RmMetadataCorrupt = 0xc0190006,
+    TransactionNotJoined = 0xc0190007,
+    DirectoryNotRm = 0xc0190008,
+    CouldNotResizeLog = 0xc0190009,
+    TransactionsUnsupportedRemote = 0xc019000a,
+    LogResizeInvalidSize = 0xc019000b,
+    RemoteFileVersionMismatch = 0xc019000c,
+    CrmProtocolAlreadyExists = 0xc019000f,
+    TransactionPropagationFailed = 0xc0190010,
+    CrmProtocolNotFound = 0xc0190011,
+    TransactionSuperiorExists = 0xc0190012,
+    TransactionRequestNotValid = 0xc0190013,
+    TransactionNotRequested = 0xc0190014,
+    TransactionAlreadyAborted = 0xc0190015,
+    TransactionAlreadyCommitted = 0xc0190016,
+    TransactionInvalidMarshallBuffer = 0xc0190017,
+    CurrentTransactionNotValid = 0xc0190018,
+    LogGrowthFailed = 0xc0190019,
+    ObjectNoLongerExists = 0xc0190021,
+    StreamMiniversionNotFound = 0xc0190022,
+    StreamMiniversionNotValid = 0xc0190023,
+    MiniversionInaccessibleFromSpecifiedTransaction = 0xc0190024,
+    CantOpenMiniversionWithModifyIntent = 0xc0190025,
+    CantCreateMoreStreamMiniversions = 0xc0190026,
+    HandleNoLongerValid = 0xc0190028,
+    NoTxfMetadata = 0xc0190029,
+    LogCorruptionDetected = 0xc0190030,
+    CantRecoverWithHandleOpen = 0xc0190031,
+    RmDisconnected = 0xc0190032,
+    EnlistmentNotSuperior = 0xc0190033,
+    RecoveryNotNeeded = 0xc0190034,
+    RmAlreadyStarted = 0xc0190035,
+    FileIdentityNotPersistent = 0xc0190036,
+    CantBreakTransactionalDependency = 0xc0190037,
+    CantCrossRmBoundary = 0xc0190038,
+    TxfDirNotEmpty = 0xc0190039,
+    IndoubtTransactionsExist = 0xc019003a,
+    TmVolatile = 0xc019003b,
+    RollbackTimerExpired = 0xc019003c,
+    TxfAttributeCorrupt = 0xc019003d,
+    EfsNotAllowedInTransaction = 0xc019003e,
+    TransactionalOpenNotAllowed = 0xc019003f,
+    TransactedMappingUnsupportedRemote = 0xc0190040,
+    TxfMetadataAlreadyPresent = 0xc0190041,
+    TransactionScopeCallbacksNotSet = 0xc0190042,
+    TransactionRequiredPromotion = 0xc0190043,
+    CannotExecuteFileInTransaction = 0xc0190044,
+    TransactionsNotFrozen = 0xc0190045,
+
+
+    /// <summary>
+    /// 3221225824 = 0xc0000160 = STATUS_ILL_FORMED_SERVICE_ENTRY in ntstatus.h which err.exe reports
+    /// This has been shown to be returned from NtUnloadDriver if the registry path is incorrect, like 2 backslashes
+    /// 
+    /// According to '2.3.1 NTSTATUS Values' :: https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+    ///     
+    ///     STATUS_ILL_FORMED_SERVICE_ENTRY = "A configuration registry node that represents a driver service entry was ill-formed and did not contain the required value entries."
+    /// </summary>
+    IllFormedServiceEntry = 0xc0000160,
+
+
+
+    /// <summary>
+    /// 
+    /// According to '2.3.1 NTSTATUS Values' :: https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/596a1078-e883-4972-9bbc-49e60bebca55
+    /// STATUS_INVALID_IMAGE_HASH = "The hash for image %hs cannot be found in the system catalogs. The image is likely corrupt or the victim of tampering."
+    /// 
+    /// This will be returned from NtLoadDriver     (or err 577 from StartServiceA / W)
+    ///     (a) Secure Boot is enabled
+    ///       See here: https://docs.microsoft.com/en-us/windows-hardware/design/device-experiences/oem-secure-boot
+    ///       " The signature database (db) and the revoked signatures database (dbx) list the signers or image hashes of UEFI applications, operating system loaders (such as the Microsoft Operating System Loader, or Boot Manager), and UEFI drivers that can be loaded on the device. The revoked list contains items that are no longer trusted and may not be loaded. If an image hash is in both databases, the revoked signatures database (dbx) takes precedent."
+    /// 
+    ///     (b) This is x64 Windows without TestSigning on and the driver isn't WHQL MS' signed
+    ///     
+    ///     (c) This is x64 Windows WITH TestSigning On, but the driver (.sys) has no signature
+    ///         That is, a driver must have some Test Signature to be loaded into the kernel for Win10 x64 OS.
+    ///         
+    /// See Wine comments:
+    /// https://www.winehq.org/pipermail/wine-devel/2020-June/167846.html
+    /// -        /* If Secure Boot is enabled or the machine is 64-bit, it will reject an unsigned driver. */
+    ///-        skip("Failed to start service; probably your machine doesn't accept unsigned drivers.\n");
+    ///
+    /// 
+    /// 
+    /// </summary>
+    InvalidHash_DigitalSigantureNotAccepted = 0xC0000428,
+
+
+    MaximumNtStatus = 0xffffffff
+}
+
+#endregion
 
 #region  [ Extension Methods ]
 
@@ -6842,6 +7620,94 @@ public static class ExtensionMethods
     {
         return a.Where(aItem => !b.Select(bItem => selectKeyB(bItem)).Contains(selectKeyA(aItem), comparer));
     }
+}
+
+#endregion
+
+#region Return Status classes
+
+public class ReturnStatus
+{
+    public bool Success = true;
+    public int ReturnCode = 0;
+    public string ReturnCodeHex = "";
+    public string ReturnCodeDescription = "";
+    public string APICall = "";
+    public string VerboseInfo = "";
+
+    public ReturnStatusNT StatusNT = new ReturnStatusNT();
+
+    public ReturnStatus()
+    { }
+
+    public ReturnStatus(string API, int code, bool success)
+    {
+        // Win32 APIs
+
+        this.Success = success;
+        this.APICall = API;
+        this.ReturnCode = code;                                 // Marshal.GetLastWin32Error();
+        this.ReturnCodeHex = ErrorHelp.Dec2Hex(code);
+        this.ReturnCodeDescription = ErrorHelp.GetErrorMessageAPI((uint)code);
+        this.VerboseInfo = "[ " + API + "] :: " + ErrorHelp.GetErrorInfo(code);        // Verbose info setting
+    }
+
+    public ReturnStatus(string API, NTSTATUS NtStatusCode, bool success)
+    {
+        // NT APIs
+
+        this.Success = success;
+        this.APICall = API;
+
+        // NtStatus specific
+        this.StatusNT.ReturnCodeNTVariableName = NtStatusCode;
+        this.StatusNT.ReturnCodeNT = (int)NtStatusCode;
+        this.StatusNT.ReturnCodeNTHex = ErrorHelp.Dec2Hex((int)NtStatusCode);
+        this.VerboseInfo = "[ " + API + "] :: " + ErrorHelp.GetErrorInfoNt(this.StatusNT.ReturnCodeNT);
+
+        // Win32 Translation
+        this.ReturnCode = ErrorHelp.RtlNtStatusToDosError((uint)NtStatusCode);
+        this.ReturnCodeHex = ErrorHelp.Dec2Hex(this.ReturnCode);
+        this.ReturnCodeDescription = ErrorHelp.GetErrorMessageAPI((uint)this.ReturnCode);
+    }
+
+    public void FailedW32(string API, int code)
+    {
+        // (same as above for Win32)
+
+        this.Success = false;
+        this.APICall = API;
+        this.ReturnCode = code;                                 // Marshal.GetLastWin32Error();
+        this.ReturnCodeHex = ErrorHelp.Dec2Hex(code);
+        this.ReturnCodeDescription = ErrorHelp.GetErrorMessageAPI((uint)code);
+        this.VerboseInfo = "[ " + API + "] :: " + ErrorHelp.GetErrorInfo(code);
+    }
+
+    public void FailedNT(string API, NTSTATUS NtStatusCode)
+    {
+        // (same as above for NT / Zw)
+
+        this.Success = false;
+        this.APICall = API;
+
+        this.StatusNT.ReturnCodeNTVariableName = NtStatusCode;
+        this.StatusNT.ReturnCodeNT = (int)NtStatusCode;
+        this.StatusNT.ReturnCodeNTHex = ErrorHelp.Dec2Hex((int)NtStatusCode);
+        this.VerboseInfo = "[ " + API + "] :: " + ErrorHelp.GetErrorInfoNt(this.StatusNT.ReturnCodeNT);
+
+        this.ReturnCode = ErrorHelp.RtlNtStatusToDosError((uint)NtStatusCode);
+        this.ReturnCodeHex = ErrorHelp.Dec2Hex(this.ReturnCode);
+        this.ReturnCodeDescription = ErrorHelp.GetErrorMessageAPI((uint)this.ReturnCode);
+    }
+
+
+}
+
+public class ReturnStatusNT
+{
+    public int ReturnCodeNT = 0;
+    public NTSTATUS ReturnCodeNTVariableName = NTSTATUS.Success;
+    public string ReturnCodeNTHex = "";
 }
 
 #endregion
