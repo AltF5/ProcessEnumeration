@@ -6961,7 +6961,7 @@ public static class ProcessModify
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool CloseHandle(IntPtr hSnapshot);
 
-    public static ReturnStatus SetCriticalProcess(int PID, bool critical)
+    public static ReturnStatus SetProcessCritical(int PID, bool critical)
     {
         var ret = new ReturnStatus();
 
@@ -7005,6 +7005,27 @@ public static class ProcessModify
         return ret;
     }
 
+    /// <summary>
+    /// Best to run elevated
+    /// </summary>
+    public static void MakeAllProcessesNonCritical()
+    {
+        foreach (var p in ProcessEnum.GetAllProcesses().Where(x => x.Critical.HasValue && x.Critical.Value).ToList())
+        {
+            Debug.WriteLine(p.Name + " - " + p.PID + " - " + p.Critical);
+
+            var stat = ProcessModify.SetProcessCritical(p.PID, false);
+            if (!stat.Success)
+            {
+                Debug.WriteLine(stat.VerboseInfo);
+            }
+            else
+            {
+                Debug.WriteLine("Changed!");
+            }
+        }
+    }
+
     #region Exmaple use
 
     /// <summary>
@@ -7026,7 +7047,7 @@ public static class ProcessModify
     //    {
     //        Debug.WriteLine(p.Name + " - " + p.PID + " - " + p.Critical);
     //
-    //        var stat = ProcessModify.SetCriticalProcess(p.PID, false);
+    //        var stat = ProcessModify.SetProcessCritical(p.PID, false);
     //        if (!stat.Success)
     //        {
     //            Debug.WriteLine(stat.VerboseInfo);
