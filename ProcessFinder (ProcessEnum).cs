@@ -51,6 +51,11 @@
 // Created:     November 2020
 // History:     November 5th 2021 - Improved RestartExplorerGracefully()
 //              June 28th 2022    - Added SetProcessCritical & listed out notable methods (above)
+//              Feb  12th 2024    - Bugfix: ProcessEnum.EnumInfoRequest.Basic wasn't including the process name, unless EnumInfoRequest.Path was supplied
+//                                - Added:  IsProcessRunning_ByPath
+//
+//
+//
 //
 // What:
 // What is this ProcessFinder.cs file?
@@ -1527,7 +1532,7 @@ public static class ProcessEnum
     /// </summary>
     [DllImport("ntdll.dll", CharSet = CharSet.Auto)]
     public static extern NTSTATUS NtQuerySystemInformation(SYSTEM_INFORMATION_CLASS SystemInformationClass, IntPtr SystemInformationBuffer, int SystemInformationLength, out int ReturnedSizeRequired);
-    
+
     #endregion
 
     #region Handles
@@ -2208,12 +2213,38 @@ public static class ProcessEnum
         return retList;
     }
 
-    /// <summary>
-    /// Utilizes Toolhelp
-    /// </summary>
-    public static bool IsProcessRunning(string processName)
+
+
+    public enum IsProcessRunning_FindBy
     {
-        // From: codeproject.com/Articles/12786/Writing-a-Win32-method-to-find-if-an-application-i
+        ByName,
+        ByPath
+    }
+
+    public static bool IsProcessRunning(string toLocate_NameOrPathOfProcess, IsProcessRunning_FindBy findBy = IsProcessRunning_FindBy.ByName)
+    {
+        if(findBy == IsProcessRunning_FindBy.ByName)
+        {
+            return IsProcessRunning_ByName(toLocate_NameOrPathOfProcess);
+        }
+        else if(findBy == IsProcessRunning_FindBy.ByPath)
+        {
+            return IsProcessRunning_ByName(toLocate_NameOrPathOfProcess);
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+
+    /// <summary>
+    ///    - Utilizes Toolhelp API
+    ///    - This is more performant than loading in more infom like   .FindProcessByName_NativeAPI("process.exe", ProcessEnum.EnumInfoRequest.Basic).Count > 0
+    /// </summary>
+    public static bool IsProcessRunning_ByName(string processName)
+    {
+        // Based on: codeproject.com/Articles/12786/Writing-a-Win32-method-to-find-if-an-application-i
 
         IntPtr handle = IntPtr.Zero;
         try
@@ -2256,6 +2287,27 @@ public static class ProcessEnum
 
         return false;
     }
+
+    /// <summary>
+    /// Alias for IsProcessRunning_ByName. Process name is case insentivie.
+    ///    - Utilized Toolhelp API
+    /// </summary>
+    public static bool DoesProcessExist_ByName(string processName)
+    {
+        return IsProcessRunning_ByName(processName);
+    }
+
+    /// <summary>
+    /// Not case sesnitive
+    /// </summary>
+    public static bool IsProcessRunning_ByPath(string processPath)
+    {
+        bool didFind = ProcessEnum.FindProcessByPath_NativeAPI(processPath, ProcessEnum.EnumInfoRequest.Path).Count > 0;
+        return didFind;
+    }
+    
+
+
 
     /// <summary>
     /// Returns all matching processes by name. Alias for GetProcessByName.
@@ -2835,7 +2887,7 @@ public static class ProcessEnum
         }
     }
 
-    public static List<ProcessInfo> FindProcessByName_ToolHelp(string applicationName, EnumInfoRequest infoReq = EnumInfoRequest.EverythingExceptModules)
+    public static List<ProcessInfo> FindProcessByName_ToolHelp(string applicationName, EnumInfoRequest infoReq = EnumInfoRequest.Basic)
     {
         // Need:
         //      Process.GetProcessesByName() doesn't always return all processes. For example: It wont for explorer (unsure why, or if due to an integrity level issue)
@@ -2913,7 +2965,7 @@ public static class ProcessEnum
     /// <summary>
     /// Returns a list of matching processes by names, loaded up with Thread info as well (such as for Window closing)
     /// </summary>
-    public static List<ProcessInfo> FindProcessByName_NativeAPI(string applicationName, EnumInfoRequest infoReq = EnumInfoRequest.EverythingExceptModules)
+    public static List<ProcessInfo> FindProcessByName_NativeAPI(string applicationName, EnumInfoRequest infoReq = EnumInfoRequest.Basic)
     {
         // Need:
         //      Process.GetProcessesByName() doesn't always return all processes. For example: It wont for explorer (unsure why, or if due to an integrity level issue)
@@ -2923,6 +2975,18 @@ public static class ProcessEnum
 
 
         return EnumProcessesAndThreads_Native_MoreInfoAndFast(infoReq).Where(x => x.Name.ToLower() == applicationName.ToLower()).ToList();
+    }
+
+    public static List<ProcessInfo> FindProcessByPath_NativeAPI(string applicationPath, EnumInfoRequest infoReq = EnumInfoRequest.Path)
+    {
+        // Need:
+        //      Process.GetProcessesByName() doesn't always return all processes. For example: It wont for explorer (unsure why, or if due to an integrity level issue)
+        //
+        // Based on:
+        //      codeproject.com/Articles/12786/Writing-a-Win32-method-to-find-if-an-application-i
+
+
+        return EnumProcessesAndThreads_Native_MoreInfoAndFast(infoReq).Where(x => x.FullPath.ToLower() == applicationPath.ToLower()).ToList();
     }
 
     #endregion
@@ -3161,7 +3225,8 @@ public static class ProcessEnum
 
         ret.StartOrderFromEnum = order;
         ret.PID = PID;
-        ret.ParentPID = parentProcessID_known != 0 ? parentProcessID_known : ProcessInformationReading.GetParentProcessID(ret.PID);     // Should always have regardless of Toolhelp or Native and not need to read, but adding GetParentProcessID() for completeness 
+        ret.ParentPID = parentProcessID_known != 0 ? parentProcessID_known : ProcessInformationReading.GetParentProcessID(ret.PID);     // Should always have regardless of Toolhelp or Native and not need to read, but adding GetParentProcessID() for completeness
+        ret.Name = processName_known;
 
         if (infoReq.HasFlag(EnumInfoRequest.Path) || WasEverythingFlagSupplied)
         {
@@ -3175,18 +3240,21 @@ public static class ProcessEnum
 
             // Company Name + Description
             //
-            try
+            if (WasEverythingFlagSupplied)
             {
-                if (System.IO.File.Exists(ret.FullPath))
+                try
                 {
-                    var verInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(ret.FullPath);
-                    ret.CompanyName = verInfo.CompanyName;
-                    ret.Description = verInfo.FileDescription;
+                    if (System.IO.File.Exists(ret.FullPath))
+                    {
+                        var verInfo = System.Diagnostics.FileVersionInfo.GetVersionInfo(ret.FullPath);
+                        ret.CompanyName = verInfo.CompanyName;
+                        ret.Description = verInfo.FileDescription;
+                    }
                 }
-            }
-            catch (Exception ex)
-            {
-                // ignore
+                catch (Exception ex)
+                {
+                    // ignore
+                }
             }
         }
 
@@ -6966,7 +7034,7 @@ public static class ProcessModify
         var ret = new ReturnStatus();
 
         IntPtr hProcessSet = ProcessEnum.OpenProcess(ProcessEnum.ProcessAccessFlags.SetInformation, false, PID);
-        if(hProcessSet == IntPtr.Zero)
+        if (hProcessSet == IntPtr.Zero)
         {
             ret.FailedW32("OpenProcess", Marshal.GetLastWin32Error());
         }
@@ -6997,7 +7065,7 @@ public static class ProcessModify
 
         NTSTATUS statCode = NtSetInformationProcess(hProcess, ProcessEnum.PROCESSINFOCLASS.ProcessBreakOnTermination_Critical, areaToWrite, inputSizeInt);
         ret.Success = statCode == NTSTATUS.Success;
-        if(!ret.Success)
+        if (!ret.Success)
         {
             ret.FailedNT("NtSetInformationProcess", statCode);
         }
@@ -7480,6 +7548,12 @@ public enum NTSTATUS : uint
     InvalidParameter10 = 0xc00000f8,
     InvalidParameter11 = 0xc00000f9,
     InvalidParameter12 = 0xc00000fa,
+
+    /// <summary>
+    /// STATUS_IMAGE_ALREADY_LOADED
+    /// </summary>
+    ImageAlreadyLoaded = 0xC000010E,
+
     MappedFileSizeZero = 0xc000011e,
     TooManyOpenedFiles = 0xc000011f,
     Cancelled = 0xc0000120,
@@ -7584,6 +7658,14 @@ public enum NTSTATUS : uint
     TransactionsNotFrozen = 0xc0190045,
 
 
+
+
+
+    //
+    // Added:
+    //
+
+
     /// <summary>
     /// 3221225824 = 0xc0000160 = STATUS_ILL_FORMED_SERVICE_ENTRY in ntstatus.h which err.exe reports
     /// This has been shown to be returned from NtUnloadDriver if the registry path is incorrect, like 2 backslashes
@@ -7622,25 +7704,9 @@ public enum NTSTATUS : uint
     InvalidHash_DigitalSigantureNotAccepted = 0xC0000428,
 
 
+
+
     MaximumNtStatus = 0xffffffff
-}
-
-#endregion
-
-#region  [ Extension Methods ]
-
-public static class ExtensionMethods
-{
-    // From: stackoverflow.com/a/22160480/5555423
-    public static IEnumerable<TA> Except<TA, TB, TK>(
-        this IEnumerable<TA> a,
-        IEnumerable<TB> b,
-        Func<TA, TK> selectKeyA,
-        Func<TB, TK> selectKeyB,
-        IEqualityComparer<TK> comparer = null)
-    {
-        return a.Where(aItem => !b.Select(bItem => selectKeyB(bItem)).Contains(selectKeyA(aItem), comparer));
-    }
 }
 
 #endregion
@@ -7720,8 +7786,6 @@ public class ReturnStatus
         this.ReturnCodeHex = ErrorHelp.Dec2Hex(this.ReturnCode);
         this.ReturnCodeDescription = ErrorHelp.GetErrorMessageAPI((uint)this.ReturnCode);
     }
-
-
 }
 
 public class ReturnStatusNT
@@ -7729,6 +7793,24 @@ public class ReturnStatusNT
     public int ReturnCodeNT = 0;
     public NTSTATUS ReturnCodeNTVariableName = NTSTATUS.Success;
     public string ReturnCodeNTHex = "";
+}
+
+#endregion
+
+#region  [ Extension Methods ]
+
+public static class ExtensionMethods
+{
+    // From: stackoverflow.com/a/22160480/5555423
+    public static IEnumerable<TA> Except<TA, TB, TK>(
+        this IEnumerable<TA> a,
+        IEnumerable<TB> b,
+        Func<TA, TK> selectKeyA,
+        Func<TB, TK> selectKeyB,
+        IEqualityComparer<TK> comparer = null)
+    {
+        return a.Where(aItem => !b.Select(bItem => selectKeyB(bItem)).Contains(selectKeyA(aItem), comparer));
+    }
 }
 
 #endregion
