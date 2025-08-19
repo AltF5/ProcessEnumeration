@@ -53,6 +53,7 @@
 //              June 28th 2022    - Added SetProcessCritical & listed out notable methods (above)
 //              Feb  12th 2024    - Bugfix: ProcessEnum.EnumInfoRequest.Basic wasn't including the process name, unless EnumInfoRequest.Path was supplied
 //                                - Added:  IsProcessRunning_ByPath
+//              Aug  18th 2025    - Added:  PID Exclusion for IsProcessRunning_ByName to check for running instance of self, such as :  if (!System.Diagnostics.Debugger.IsAttached && ProcessEnum.IsProcessRunning_ByName(thisExeName, Process.GetCurrentProcess().Id))   Environment.Exit(0);
 //
 //
 //
