@@ -2237,12 +2237,47 @@ public static class ProcessEnum
         }
     }
 
+    public static bool IsProcessRunning(string toLocate_NameOrPathOfProcess, int PIDToExclude, IsProcessRunning_FindBy findBy = IsProcessRunning_FindBy.ByName)
+    {
+        if (findBy == IsProcessRunning_FindBy.ByName)
+        {
+            return IsProcessRunning_ByName(toLocate_NameOrPathOfProcess, PIDToExclude);
+        }
+        else if (findBy == IsProcessRunning_FindBy.ByPath)
+        {
+            return IsProcessRunning_ByName(toLocate_NameOrPathOfProcess, PIDToExclude);
+        }
+        else
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// -1 will be returned if it is NOT running
+    /// </summary>
+    public static int IsProcessRunning_GetPID(string toLocate_NameOrPathOfProcess, IsProcessRunning_FindBy findBy = IsProcessRunning_FindBy.ByName)
+    {
+        if (findBy == IsProcessRunning_FindBy.ByName)
+        {
+            return IsProcessRunning_ByName_GetPID(toLocate_NameOrPathOfProcess);
+        }
+        else if (findBy == IsProcessRunning_FindBy.ByPath)
+        {
+            return IsProcessRunning_ByName_GetPID(toLocate_NameOrPathOfProcess);
+        }
+        else
+        {
+            return -1;
+        }
+    }
+
 
     /// <summary>
     ///    - Utilizes Toolhelp API
     ///    - This is more performant than loading in more infom like   .FindProcessByName_NativeAPI("process.exe", ProcessEnum.EnumInfoRequest.Basic).Count > 0
     /// </summary>
-    public static bool IsProcessRunning_ByName(string processName)
+    public static bool IsProcessRunning_ByName(string processName, int PIDToExclude = -1)
     {
         // Based on: codeproject.com/Articles/12786/Writing-a-Win32-method-to-find-if-an-application-i
 
@@ -2260,6 +2295,19 @@ public static class ProcessEnum
                 {
                     if (string.Compare(info.szExeFile, processName, true) == 0)
                     {
+                        // Exclusion check
+                        //
+                        if(PIDToExclude > -1)       // If it was set
+                        {
+                            if(PIDToExclude == info.th32ProcessID)
+                            {
+                                // This was the 1 process to exclude (such as itself), so continue the loop
+                                continue;
+                            }
+                        }
+
+                        // Found the process
+                        //
                         return true;
                     }
                 }
@@ -2286,6 +2334,57 @@ public static class ProcessEnum
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// -1 is returned if the process it not running
+    ///    - Utilizes Toolhelp API
+    ///    - This is more performant than loading in more infom like   .FindProcessByName_NativeAPI("process.exe", ProcessEnum.EnumInfoRequest.Basic).Count > 0
+    /// </summary>
+    public static int IsProcessRunning_ByName_GetPID(string processName)
+    {
+        // Based on: codeproject.com/Articles/12786/Writing-a-Win32-method-to-find-if-an-application-i
+
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            handle = CreateToolhelp32Snapshot(SnapshotFlags.Process, 0);
+            var info = new PROCESSENTRY32();
+            info.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+
+            bool worked = Process32First(handle, ref info);
+            if (worked)
+            {
+                do
+                {
+                    if (string.Compare(info.szExeFile, processName, true) == 0)
+                    {
+                        return (int)info.th32ProcessID;
+                    }
+                }
+                while (Process32Next(handle, ref info));
+            }
+        }
+        catch
+        {
+            //return false;
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                try
+                {
+                    CloseHandle(handle);
+                }
+                catch (Exception ex)
+                {
+                    // Ignore
+                }
+            }
+        }
+
+        return -1;      // -1 = Not running
     }
 
     /// <summary>
